@@ -1,0 +1,3 @@
+{"filename":"a-valid.task-envelope.v0.json","reason":"processed_sha256:7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5","status":"processed","timestamp":"2026-03-18T14:23:23.309Z"}
+{"filename":"b-duplicate.task-envelope.v0.json","reason":"duplicate_sha256:7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5","status":"skipped","timestamp":"2026-03-18T14:23:23.511Z"}
+{"filename":"c-invalid.task-envelope.v0.json","reason":"unsupported_schema_version:v1","status":"failed","timestamp":"2026-03-18T14:23:23.712Z"}
