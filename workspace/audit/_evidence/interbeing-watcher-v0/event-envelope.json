@@ -1,0 +1,15 @@
+{
+  "schema_version": "v0",
+  "event_id": "evt-local-e2e-running-001",
+  "event_type": "task.running",
+  "node_id": "dali",
+  "correlation_id": "corr-handoff-file-001",
+  "timestamp": "2026-03-18T09:00:02Z",
+  "payload": {
+    "task_id": "task-handoff-file-001",
+    "requestor": "c_lawd",
+    "target_node": "dali",
+    "status": "running",
+    "message": "Running local interbeing v0 harness."
+  }
+}
