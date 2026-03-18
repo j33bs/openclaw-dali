@@ -1,0 +1,11 @@
+ M README.md
+?? config/vllm/dali_local_exec.yaml
+?? hooks/telegram-dali-bootstrap/HOOK.md
+?? hooks/telegram-dali-bootstrap/handler.ts
+?? workspace/audit/_evidence/dali-owned-surface-import/changed-files.txt
+?? workspace/audit/_evidence/dali-owned-surface-import/conflicts.md
+?? workspace/audit/_evidence/dali-owned-surface-import/coupling-hotspots.md
+?? workspace/audit/_evidence/dali-owned-surface-import/dali-classification.md
+?? workspace/audit/_evidence/dali-owned-surface-import/git-status.txt
+?? workspace/audit/_evidence/dali-owned-surface-import/imported-paths.md
+?? workspace/audit/_evidence/dali-owned-surface-import/rollback-notes.md

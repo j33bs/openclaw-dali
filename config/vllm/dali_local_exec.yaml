@@ -1,0 +1,21 @@
+# Dali local execution vLLM template (no secrets).
+serve:
+  host: 127.0.0.1
+  port: 8001
+  api_key_env: OPENCLAW_LOCAL_EXEC_VLLM_API_KEY
+  served_model_name: local-exec-coordinator
+  gpu_memory_utilization: 0.85
+  max_model_len: 8192
+  max_num_seqs: 8
+  trust_remote_code: false
+  disable_log_requests: true
+
+openai_compat:
+  base_url: http://127.0.0.1:8001/v1
+  model: local-exec-coordinator
+
+generation:
+  temperature: 0.0
+  top_p: 1.0
+  max_tokens: 1024
+  parallel_tool_calls: false
