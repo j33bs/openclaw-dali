@@ -1,3 +1,10 @@
+Derived from:
+- https://github.com/openclaw/openclaw (upstream)
+- https://github.com/j33bs/openclaw-dali (reference fork)
+
+Role:
+Operator / orchestration node within the OpenClaw ecosystem.
+
 # 🦞 OpenClaw — Personal AI Assistant
 
 <p align="center">
