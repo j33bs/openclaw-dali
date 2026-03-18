@@ -10,7 +10,9 @@ Scope:
 Entrypoint:
 
 - `corepack pnpm exec tsx scripts/dev/interbeing-e2e-local-v0.ts`
-- input source: inline default submit_task envelope
+- file-input rerun: `corepack pnpm exec tsx scripts/dev/interbeing-e2e-local-v0.ts --input scripts/dev/fixtures/interbeing-handoff-task-envelope.v0.json`
+- input mode: `handoff-file`
+- input source: `scripts/dev/fixtures/interbeing-handoff-task-envelope.v0.json`
 - interbeing schema source: `/home/jeebs/src/openclaw-interbeing`
 - artifact directory: `/home/jeebs/src/openclaw-dali/workspace/audit/_evidence/interbeing-e2e-local-v0`
 

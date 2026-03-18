@@ -23,6 +23,15 @@ const DEFAULT_OUTPUT_DIR = path.join(
   "interbeing-e2e-local-v0",
 );
 const RERUN_COMMAND = "corepack pnpm exec tsx scripts/dev/interbeing-e2e-local-v0.ts";
+const DEFAULT_HANDOFF_FIXTURE_PATH = path.join(
+  process.cwd(),
+  "scripts",
+  "dev",
+  "fixtures",
+  "interbeing-handoff-task-envelope.v0.json",
+);
+
+type InputMode = "handoff-file" | "inline-default";
 
 type CliArgs = {
   inputPath?: string;
@@ -34,6 +43,12 @@ type ValidationSummary = {
   eventEnvelope: "direct_schema";
   inputSubmitTask: "direct_schema";
   taskStatuses: "direct_schema";
+};
+
+type LoadedInput = {
+  inputEnvelope: InterbeingTaskEnvelopeV0;
+  inputMode: InputMode;
+  inputSource: string;
 };
 
 type SchemaValidators = {
@@ -138,13 +153,22 @@ function assertSchemaMatch(label: string, validate: ValidateFunction, value: unk
   throw new Error(`${label} failed schema validation: ${JSON.stringify(validate.errors)}`);
 }
 
-async function loadInputEnvelope(args: CliArgs): Promise<InterbeingTaskEnvelopeV0> {
+async function loadInputEnvelope(args: CliArgs): Promise<LoadedInput> {
   if (!args.inputPath) {
-    return createDefaultEnvelope();
+    return {
+      inputEnvelope: createDefaultEnvelope(),
+      inputMode: "inline-default",
+      inputSource: "inline default submit_task envelope",
+    };
   }
 
-  const raw = await readJsonFile<unknown>(path.resolve(args.inputPath));
-  return parseSubmitTaskEnvelopeV0(raw);
+  const resolvedInputPath = path.resolve(args.inputPath);
+  const raw = await readJsonFile<unknown>(resolvedInputPath);
+  return {
+    inputEnvelope: parseSubmitTaskEnvelopeV0(raw),
+    inputMode: "handoff-file",
+    inputSource: path.relative(process.cwd(), resolvedInputPath) || resolvedInputPath,
+  };
 }
 
 function pickRepresentativeEvent(events: InterbeingEventEnvelopeV0[]): InterbeingEventEnvelopeV0 {
@@ -160,7 +184,8 @@ function pickRepresentativeEvent(events: InterbeingEventEnvelopeV0[]): Interbein
 }
 
 function buildNotes(params: {
-  inputPath?: string;
+  inputMode: InputMode;
+  inputSource: string;
   interbeingDir: string;
   outputDir: string;
   representativeEvent: InterbeingEventEnvelopeV0;
@@ -179,9 +204,9 @@ function buildNotes(params: {
     "",
     "Entrypoint:",
     `- \`${RERUN_COMMAND}\``,
-    params.inputPath
-      ? `- input source: \`${params.inputPath}\``
-      : "- input source: inline default submit_task envelope",
+    `- file-input rerun: \`${RERUN_COMMAND} --input ${path.relative(process.cwd(), DEFAULT_HANDOFF_FIXTURE_PATH) || DEFAULT_HANDOFF_FIXTURE_PATH}\``,
+    `- input mode: \`${params.inputMode}\``,
+    `- input source: \`${params.inputSource}\``,
     `- interbeing schema source: \`${params.interbeingDir}\``,
     `- artifact directory: \`${params.outputDir}\``,
     "",
@@ -205,8 +230,8 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   await mkdir(args.outputDir, { recursive: true });
 
-  const inputEnvelope = await loadInputEnvelope(args);
-  const parsedEnvelope = parseSubmitTaskEnvelopeV0(inputEnvelope);
+  const loadedInput = await loadInputEnvelope(args);
+  const parsedEnvelope = parseSubmitTaskEnvelopeV0(loadedInput.inputEnvelope);
   const lifecycle = emitLocalTaskLifecycleV0(parsedEnvelope, {
     createEventId: createDeterministicEventIdSource(),
     now: createDeterministicTimestampSource(),
@@ -247,7 +272,8 @@ async function main(): Promise<void> {
     writeTextFile(
       path.join(args.outputDir, "e2e-notes.md"),
       buildNotes({
-        inputPath: args.inputPath,
+        inputMode: loadedInput.inputMode,
+        inputSource: loadedInput.inputSource,
         interbeingDir: args.interbeingDir,
         outputDir: args.outputDir,
         representativeEvent,
@@ -260,6 +286,8 @@ async function main(): Promise<void> {
   const summary: JsonObject = {
     artifactDir: path.relative(process.cwd(), args.outputDir),
     eventType: representativeEvent.event_type,
+    inputMode: loadedInput.inputMode,
+    inputSource: loadedInput.inputSource,
     statusFlow: lifecycle.statuses.map((entry) => entry.status),
     validation,
   };

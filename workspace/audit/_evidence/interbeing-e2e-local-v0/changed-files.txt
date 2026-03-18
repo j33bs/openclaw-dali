@@ -1,3 +1,4 @@
+scripts/dev/fixtures/interbeing-handoff-task-envelope.v0.json
 scripts/dev/interbeing-e2e-local-v0.ts
 workspace/audit/_evidence/interbeing-e2e-local-v0/changed-files.txt
 workspace/audit/_evidence/interbeing-e2e-local-v0/e2e-notes.md

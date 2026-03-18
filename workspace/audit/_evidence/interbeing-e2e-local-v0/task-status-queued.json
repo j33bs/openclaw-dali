@@ -1,6 +1,6 @@
 {
   "schema_version": "v0",
-  "task_id": "task-local-e2e-001",
+  "task_id": "task-handoff-file-001",
   "node_id": "dali",
   "status": "queued",
   "updated_at": "2026-03-18T09:00:01Z",
