@@ -1,4 +1,5 @@
 Derived from:
+
 - https://github.com/openclaw/openclaw (upstream)
 - https://github.com/j33bs/openclaw-dali (reference fork)
 
@@ -8,6 +9,10 @@ Operator / orchestration node within the OpenClaw ecosystem.
 Source remains the shared substrate and contract layer.
 This repo carries Dali-owned orchestration surfaces and local adapters on top of that shared base.
 This pass imports `hooks/telegram-dali-bootstrap/` and `config/vllm/dali_local_exec.yaml` as explicit Dali-owned surfaces.
+It also carries a thin local interbeing v0 lifecycle adapter in
+`src/shared/interbeing-task-lifecycle-v0.ts` that only parses local
+`submit_task` envelopes and emits local task-status and event-envelope payloads.
+Transport, auth, and shared bootstrap resolution remain deferred.
 
 # 🦞 OpenClaw — Personal AI Assistant
 

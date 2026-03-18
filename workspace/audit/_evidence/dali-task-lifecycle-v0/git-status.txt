@@ -1,0 +1,8 @@
+## codex/feat/dali-task-lifecycle-v0
+ M README.md
+?? src/shared/interbeing-task-lifecycle-v0.test.ts
+?? src/shared/interbeing-task-lifecycle-v0.ts
+?? workspace/audit/_evidence/dali-task-lifecycle-v0/changed-files.txt
+?? workspace/audit/_evidence/dali-task-lifecycle-v0/git-status.txt
+?? workspace/audit/_evidence/dali-task-lifecycle-v0/lifecycle-smoke.md
+?? workspace/audit/_evidence/dali-task-lifecycle-v0/rollback-notes.md

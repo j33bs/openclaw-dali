@@ -1,0 +1,9 @@
+## codex/feat/dali-handoff-file-v0
+ M scripts/dev/interbeing-e2e-local-v0.ts
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/e2e-notes.md
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/event-envelope.json
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/input-submit-task.json
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-queued.json
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-running.json
+ M workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-succeeded.json
+?? scripts/dev/fixtures/
