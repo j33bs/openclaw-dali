@@ -1,0 +1,19 @@
+{
+  "evidence": {
+    "lifecycle_output_dir": null,
+    "log_path": "workspace/audit/interbeing_watcher_v0.log",
+    "state_path": "workspace/state/interbeing_watcher_v0.json"
+  },
+  "final_disposition": "skipped",
+  "intake_path": "handoff/incoming/dali/b-duplicate.task-envelope.v0.json",
+  "intake_timestamp": "2026-03-18T15:45:18.504Z",
+  "original_filename": "b-duplicate.task-envelope.v0.json",
+  "reason_code": "duplicate",
+  "reason_detail": "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5",
+  "schema_version": "v0",
+  "sha256": "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5",
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "final_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/b-duplicate.task-envelope.v0.json",
+  "receipt_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/b-duplicate.task-envelope.v0.receipt.json"
+}

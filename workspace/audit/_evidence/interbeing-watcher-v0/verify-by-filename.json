@@ -1,0 +1,31 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "found": true,
+  "query": {
+    "filename": "a-valid.task-envelope.v0.json",
+    "sha256": null
+  },
+  "matches": [
+    {
+      "disposition": "processed",
+      "file": "handoff/processed/dali/a-valid.task-envelope.v0.1.json",
+      "intake_timestamp": "2026-03-18T15:45:19.338Z",
+      "original_filename": "a-valid.task-envelope.v0.json",
+      "reason_code": "processed",
+      "receipt_path": "handoff/processed/dali/a-valid.task-envelope.v0.1.receipt.json",
+      "sha256": "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5",
+      "tracked_hash": true
+    },
+    {
+      "disposition": "processed",
+      "file": "handoff/processed/dali/a-valid.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-18T15:45:18.261Z",
+      "original_filename": "a-valid.task-envelope.v0.json",
+      "reason_code": "processed",
+      "receipt_path": "handoff/processed/dali/a-valid.task-envelope.v0.receipt.json",
+      "sha256": "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5",
+      "tracked_hash": true
+    }
+  ]
+}

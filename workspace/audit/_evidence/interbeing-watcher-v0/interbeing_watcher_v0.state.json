@@ -3,7 +3,12 @@
   "processed_hashes": {
     "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5": {
       "filename": "a-valid.task-envelope.v0.json",
-      "processed_at": "2026-03-18T14:23:23.308Z"
+      "processed_at": "2026-03-18T15:45:19.553Z"
+    },
+    "2e2f76b9441d88724fc6daf5e016e70566af4998a9985d13624014a6d9d6f7bd": {
+      "filename": "d-replay.task-envelope.v0.json",
+      "processed_at": "2026-03-18T15:45:19.336Z"
     }
-  }
+  },
+  "reprocess_overrides": {}
 }

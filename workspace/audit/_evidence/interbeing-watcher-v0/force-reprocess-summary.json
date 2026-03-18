@@ -1,0 +1,9 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "force_reprocess": true,
+  "queued_path": "handoff/incoming/dali/a-valid.task-envelope.v0.json",
+  "reason_code": "force_reprocess_requested",
+  "sha256": "7ac66ebc50eb99bc377b8beea405f3448a81d9df0d3c0d5f885af733abff50d5",
+  "source_file": "handoff/processed/dali/a-valid.task-envelope.v0.json"
+}

@@ -1,0 +1,29 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "available_modes": ["once", "start", "status", "list", "verify", "replay"],
+  "paths": {
+    "incoming": "handoff/incoming/dali",
+    "processed": "handoff/processed/dali",
+    "failed": "handoff/failed/dali"
+  },
+  "counts": {
+    "incoming": 0,
+    "processed": 3,
+    "failed": 2,
+    "partial": 0
+  },
+  "state": {
+    "exists": true,
+    "path": "workspace/state/interbeing_watcher_v0.json",
+    "tracked_hashes": 2,
+    "pending_reprocess_overrides": 0
+  },
+  "last_processed_timestamp": "2026-03-18T15:45:19.338Z",
+  "last_failed_timestamp": "2026-03-18T15:45:18.908Z",
+  "log_path": "workspace/audit/interbeing_watcher_v0.log",
+  "health": {
+    "status": "ok",
+    "issues": []
+  }
+}

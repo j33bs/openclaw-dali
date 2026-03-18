@@ -1,7 +1,11 @@
 # Rollback Notes
 
-This pass adds a local Dali intake watcher, a small watcher CLI wrapper, a focused
-watcher smoke, and the watcher evidence bundle.
+This pass hardens the existing local watcher with:
+
+- classified receipts for processed, failed, and skipped artifacts
+- operator status, list, verify, and replay control surfaces
+- one-shot force-reprocess overrides
+- expanded smoke evidence and focused watcher tests
 
 To rollback after commit:
 
@@ -11,10 +15,13 @@ git revert --no-edit <commit-sha>
 
 If reverting before commit, remove:
 
-- `scripts/interbeing/`
-- `scripts/dev/test_interbeing_watcher_v0.ts`
-- `workspace/audit/_evidence/interbeing-watcher-v0/`
+- `scripts/interbeing/watcher_v0_support.ts`
+- `scripts/interbeing/README.md`
+- `test/interbeing-watcher-v0.test.ts`
 
 And restore:
 
-- `scripts/dev/interbeing-e2e-local-v0.ts`
+- `scripts/interbeing/watch_handoff_v0.ts`
+- `scripts/interbeing/run_watcher_v0.ts`
+- `scripts/dev/test_interbeing_watcher_v0.ts`
+- `workspace/audit/_evidence/interbeing-watcher-v0/`

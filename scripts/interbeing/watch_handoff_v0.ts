@@ -1,39 +1,44 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import chokidar from "chokidar";
+import { parseSubmitTaskEnvelopeV0 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
 import { DEFAULT_INTERBEING_DIR, runInterbeingE2ELocalV0 } from "../dev/interbeing-e2e-local-v0.ts";
+import {
+  WATCHER_TOOL_NAME,
+  WATCHER_TOOL_VERSION,
+  appendWatcherLog,
+  ensureWatcherRuntimePaths,
+  hashFileContents,
+  isPartialTaskEnvelopeFile,
+  isTaskEnvelopeFile,
+  listEnvelopeFiles,
+  listPartialEnvelopeFiles,
+  listRecentWatcherReceipts,
+  moveIntoDirectory,
+  normalizeErrorMessage,
+  nowIso,
+  queueReplayIntoIncoming,
+  readWatcherState,
+  resolveInterbeingWatcherV0Paths,
+  summarizeWatcherStatus,
+  toRepoRelative,
+  verifyWatcherArtifact,
+  waitForStableFile,
+  writeReceiptForMovedFile,
+  writeWatcherState,
+  type InterbeingWatcherV0Disposition,
+  type InterbeingWatcherV0LogEntry,
+  type InterbeingWatcherV0Mode,
+  type InterbeingWatcherV0Paths,
+  type InterbeingWatcherV0ProcessResult,
+  type InterbeingWatcherV0ReasonCode,
+  type InterbeingWatcherV0State,
+  type InterbeingWatcherV0StatusSummary,
+  type InterbeingWatcherV0Summary,
+  type InterbeingWatcherV0VerifySummary,
+} from "./watcher_v0_support.ts";
 
-export type InterbeingWatcherV0Mode = "once" | "start";
-export type InterbeingWatcherV0Status = "failed" | "processed" | "skipped";
-
-export type InterbeingWatcherV0Paths = {
-  failedDir: string;
-  handoffRoot: string;
-  incomingDir: string;
-  lifecycleOutputDir: string;
-  logPath: string;
-  processedDir: string;
-  statePath: string;
-};
-
-export type InterbeingWatcherV0State = {
-  processed_hashes: Record<
-    string,
-    {
-      filename: string;
-      processed_at: string;
-    }
-  >;
-  schema_version: "v0";
-};
-
-export type InterbeingWatcherV0LogEntry = {
-  filename: string;
-  reason: string;
-  status: InterbeingWatcherV0Status;
-  timestamp: string;
-};
+export type { InterbeingWatcherV0Mode, InterbeingWatcherV0Paths, InterbeingWatcherV0ReasonCode };
 
 export type InterbeingWatcherV0Options = {
   cwd?: string;
@@ -41,144 +46,41 @@ export type InterbeingWatcherV0Options = {
   mode: InterbeingWatcherV0Mode;
   onIdle?: () => void | Promise<void>;
   paths?: Partial<InterbeingWatcherV0Paths>;
+  runLifecycle?: (options: {
+    inputPath: string;
+    interbeingDir: string;
+    outputDir: string;
+  }) => Promise<unknown>;
 };
 
-export type InterbeingWatcherV0Summary = {
-  failed: number;
-  mode: InterbeingWatcherV0Mode;
-  processed: number;
-  skipped: number;
-};
-
-const WATCHER_OUTPUT_ROOT = "interbeing-watcher-v0";
-const STATE_SCHEMA_VERSION = "v0";
 const STABILITY_DELAY_MS = 200;
 const STABILITY_POLLS = 3;
-const WATCH_PATTERN = ".task-envelope.v0.json";
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function normalizeErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function isTaskEnvelopeFile(filePath: string): boolean {
-  const baseName = path.basename(filePath);
-  return baseName.endsWith(WATCH_PATTERN) && !baseName.endsWith(".partial");
-}
-
-function withCounterSuffix(filePath: string, counter: number): string {
-  const extension = path.extname(filePath);
-  const base = extension.length > 0 ? filePath.slice(0, -extension.length) : filePath;
-  return `${base}.${counter}${extension}`;
-}
-
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await stat(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function resolveInterbeingWatcherV0Paths(cwd = process.cwd()): InterbeingWatcherV0Paths {
-  const repoRoot = path.resolve(cwd);
-  const handoffRoot = path.join(repoRoot, "handoff");
+function createLogEntry(params: {
+  action: InterbeingWatcherV0LogEntry["action"];
+  filename: string;
+  finalPath?: string | null;
+  paths: InterbeingWatcherV0Paths;
+  reasonCode: InterbeingWatcherV0ReasonCode;
+  reasonDetail?: string | null;
+  receiptPath?: string | null;
+  sha256?: string | null;
+  status: InterbeingWatcherV0LogEntry["status"];
+  timestamp?: string;
+}): InterbeingWatcherV0LogEntry {
   return {
-    handoffRoot,
-    incomingDir: path.join(handoffRoot, "incoming", "dali"),
-    processedDir: path.join(handoffRoot, "processed", "dali"),
-    failedDir: path.join(handoffRoot, "failed", "dali"),
-    statePath: path.join(repoRoot, "workspace", "state", "interbeing_watcher_v0.json"),
-    logPath: path.join(repoRoot, "workspace", "audit", "interbeing_watcher_v0.log"),
-    lifecycleOutputDir: path.join(repoRoot, "workspace", "audit", WATCHER_OUTPUT_ROOT, "last-run"),
+    action: params.action,
+    filename: params.filename,
+    final_path: toRepoRelative(params.paths, params.finalPath) ?? null,
+    reason_code: params.reasonCode,
+    reason_detail: params.reasonDetail ?? null,
+    receipt_path: toRepoRelative(params.paths, params.receiptPath) ?? null,
+    sha256: params.sha256 ?? null,
+    status: params.status,
+    timestamp: params.timestamp ?? nowIso(),
+    tool_name: WATCHER_TOOL_NAME,
+    watcher_version: WATCHER_TOOL_VERSION,
   };
-}
-
-async function ensureRuntimePaths(paths: InterbeingWatcherV0Paths): Promise<void> {
-  await Promise.all([
-    mkdir(paths.incomingDir, { recursive: true }),
-    mkdir(paths.processedDir, { recursive: true }),
-    mkdir(paths.failedDir, { recursive: true }),
-    mkdir(path.dirname(paths.statePath), { recursive: true }),
-    mkdir(path.dirname(paths.logPath), { recursive: true }),
-    mkdir(paths.lifecycleOutputDir, { recursive: true }),
-  ]);
-}
-
-async function readWatcherState(statePath: string): Promise<InterbeingWatcherV0State> {
-  if (!(await pathExists(statePath))) {
-    return {
-      schema_version: STATE_SCHEMA_VERSION,
-      processed_hashes: {},
-    };
-  }
-
-  const raw = JSON.parse(await readFile(statePath, "utf8")) as Partial<InterbeingWatcherV0State>;
-  if (raw.schema_version !== STATE_SCHEMA_VERSION || !raw.processed_hashes) {
-    throw new Error(`invalid watcher state schema in ${statePath}`);
-  }
-  return {
-    schema_version: STATE_SCHEMA_VERSION,
-    processed_hashes: raw.processed_hashes,
-  };
-}
-
-async function writeWatcherState(
-  statePath: string,
-  state: InterbeingWatcherV0State,
-): Promise<void> {
-  const tempPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  await rename(tempPath, statePath);
-}
-
-async function appendWatcherLog(
-  logPath: string,
-  entry: InterbeingWatcherV0LogEntry,
-): Promise<void> {
-  await writeFile(logPath, `${JSON.stringify(entry)}\n`, { encoding: "utf8", flag: "a" });
-}
-
-async function hashFileContents(filePath: string): Promise<string> {
-  const buffer = await readFile(filePath);
-  return createHash("sha256").update(buffer).digest("hex");
-}
-
-async function waitForStableFile(filePath: string): Promise<boolean> {
-  let previousSignature = "";
-  for (let attempt = 0; attempt < STABILITY_POLLS; attempt += 1) {
-    if (!(await pathExists(filePath))) {
-      return false;
-    }
-    const stats = await stat(filePath);
-    const signature = `${stats.size}:${stats.mtimeMs}`;
-    if (signature === previousSignature) {
-      return true;
-    }
-    previousSignature = signature;
-    await wait(STABILITY_DELAY_MS);
-  }
-  return false;
-}
-
-async function moveIntoDirectory(sourcePath: string, targetDir: string): Promise<string> {
-  const baseName = path.basename(sourcePath);
-  let candidatePath = path.join(targetDir, baseName);
-  let counter = 1;
-  while (await pathExists(candidatePath)) {
-    candidatePath = withCounterSuffix(path.join(targetDir, baseName), counter);
-    counter += 1;
-  }
-  await rename(sourcePath, candidatePath);
-  return candidatePath;
 }
 
 async function resetLifecycleOutputDir(outputDir: string): Promise<void> {
@@ -186,133 +88,486 @@ async function resetLifecycleOutputDir(outputDir: string): Promise<void> {
   await mkdir(outputDir, { recursive: true });
 }
 
+async function logIgnoredPartial(params: {
+  filePath: string;
+  observedPartials: Set<string>;
+  paths: InterbeingWatcherV0Paths;
+}): Promise<void> {
+  const resolvedPath = path.resolve(params.filePath);
+  if (params.observedPartials.has(resolvedPath)) {
+    return;
+  }
+  params.observedPartials.add(resolvedPath);
+  await appendWatcherLog(
+    params.paths.logPath,
+    createLogEntry({
+      action: "intake",
+      filename: path.basename(resolvedPath),
+      finalPath: resolvedPath,
+      paths: params.paths,
+      reasonCode: "partial_ignored",
+      status: "skipped",
+    }),
+  );
+}
+
+async function logIgnoredPartialsInQueue(params: {
+  incomingDir: string;
+  observedPartials: Set<string>;
+  paths: InterbeingWatcherV0Paths;
+}): Promise<void> {
+  const partials = await listPartialEnvelopeFiles(params.incomingDir);
+  for (const filePath of partials) {
+    await logIgnoredPartial({
+      filePath,
+      observedPartials: params.observedPartials,
+      paths: params.paths,
+    });
+  }
+}
+
+async function finalizeMovedOutcome(params: {
+  disposition: InterbeingWatcherV0Disposition;
+  filename: string;
+  intakePath: string;
+  intakeTimestamp: string;
+  paths: InterbeingWatcherV0Paths;
+  reasonCode: InterbeingWatcherV0ReasonCode;
+  reasonDetail?: string | null;
+  sha256?: string | null;
+  status: InterbeingWatcherV0LogEntry["status"];
+  targetDir: string;
+}): Promise<InterbeingWatcherV0ProcessResult> {
+  let finalPath: string | null = null;
+  try {
+    finalPath = await moveIntoDirectory(params.intakePath, params.targetDir);
+  } catch (err) {
+    await appendWatcherLog(
+      params.paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename: params.filename,
+        finalPath: null,
+        paths: params.paths,
+        reasonCode: "move_error",
+        reasonDetail: normalizeErrorMessage(err),
+        sha256: params.sha256,
+        status: "failed",
+        timestamp: params.intakeTimestamp,
+      }),
+    );
+    return {
+      disposition: "failed",
+      filename: params.filename,
+      finalPath: null,
+      intakeTimestamp: params.intakeTimestamp,
+      reasonCode: "move_error",
+      reasonDetail: normalizeErrorMessage(err),
+      receiptPath: null,
+      sha256: params.sha256 ?? null,
+    };
+  }
+
+  try {
+    const receiptPath = await writeReceiptForMovedFile(finalPath, {
+      evidence: {
+        lifecycle_output_dir:
+          params.disposition === "processed"
+            ? (toRepoRelative(params.paths, params.paths.lifecycleOutputDir) ??
+              params.paths.lifecycleOutputDir)
+            : null,
+        log_path: toRepoRelative(params.paths, params.paths.logPath) ?? params.paths.logPath,
+        state_path: toRepoRelative(params.paths, params.paths.statePath) ?? params.paths.statePath,
+      },
+      final_disposition: params.disposition,
+      intake_path: toRepoRelative(params.paths, params.intakePath) ?? params.intakePath,
+      intake_timestamp: params.intakeTimestamp,
+      original_filename: params.filename,
+      reason_code: params.reasonCode,
+      reason_detail: params.reasonDetail ?? null,
+      schema_version: "v0",
+      sha256: params.sha256 ?? null,
+      tool_name: WATCHER_TOOL_NAME,
+      watcher_version: WATCHER_TOOL_VERSION,
+    });
+    await appendWatcherLog(
+      params.paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename: params.filename,
+        finalPath,
+        paths: params.paths,
+        reasonCode: params.reasonCode,
+        reasonDetail: params.reasonDetail ?? null,
+        receiptPath,
+        sha256: params.sha256,
+        status: params.status,
+        timestamp: params.intakeTimestamp,
+      }),
+    );
+    return {
+      disposition: params.disposition,
+      filename: params.filename,
+      finalPath: toRepoRelative(params.paths, finalPath) ?? finalPath,
+      intakeTimestamp: params.intakeTimestamp,
+      reasonCode: params.reasonCode,
+      reasonDetail: params.reasonDetail ?? null,
+      receiptPath: toRepoRelative(params.paths, receiptPath) ?? receiptPath,
+      sha256: params.sha256 ?? null,
+    };
+  } catch (err) {
+    await appendWatcherLog(
+      params.paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename: params.filename,
+        finalPath,
+        paths: params.paths,
+        reasonCode: "unexpected_internal_error",
+        reasonDetail: normalizeErrorMessage(err),
+        sha256: params.sha256,
+        status: "failed",
+        timestamp: params.intakeTimestamp,
+      }),
+    );
+    return {
+      disposition: "failed",
+      filename: params.filename,
+      finalPath: toRepoRelative(params.paths, finalPath) ?? finalPath,
+      intakeTimestamp: params.intakeTimestamp,
+      reasonCode: "unexpected_internal_error",
+      reasonDetail: normalizeErrorMessage(err),
+      receiptPath: null,
+      sha256: params.sha256 ?? null,
+    };
+  }
+}
+
 async function processSingleFile(params: {
   filePath: string;
   interbeingDir: string;
   paths: InterbeingWatcherV0Paths;
+  runLifecycle: NonNullable<InterbeingWatcherV0Options["runLifecycle"]>;
   state: InterbeingWatcherV0State;
-}): Promise<InterbeingWatcherV0Status> {
-  const filePath = path.resolve(params.filePath);
-  const filename = path.basename(filePath);
-  if (!isTaskEnvelopeFile(filePath)) {
-    return "skipped";
-  }
-  if (!(await waitForStableFile(filePath))) {
-    await appendWatcherLog(params.paths.logPath, {
+}): Promise<InterbeingWatcherV0ProcessResult> {
+  const intakePath = path.resolve(params.filePath);
+  const filename = path.basename(intakePath);
+  const intakeTimestamp = nowIso();
+
+  if (!isTaskEnvelopeFile(intakePath)) {
+    return {
+      disposition: "skipped",
       filename,
-      reason: "file_not_stable",
-      status: "skipped",
-      timestamp: nowIso(),
-    });
-    return "skipped";
+      finalPath: null,
+      intakeTimestamp,
+      reasonCode: "partial_ignored",
+      reasonDetail: null,
+      receiptPath: null,
+      sha256: null,
+    };
   }
 
-  let rawText = "";
+  if (
+    !(await waitForStableFile(intakePath, {
+      delayMs: STABILITY_DELAY_MS,
+      polls: STABILITY_POLLS,
+    }))
+  ) {
+    await appendWatcherLog(
+      params.paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename,
+        finalPath: intakePath,
+        paths: params.paths,
+        reasonCode: "file_not_ready",
+        status: "skipped",
+        timestamp: intakeTimestamp,
+      }),
+    );
+    return {
+      disposition: "skipped",
+      filename,
+      finalPath: toRepoRelative(params.paths, intakePath) ?? intakePath,
+      intakeTimestamp,
+      reasonCode: "file_not_ready",
+      reasonDetail: null,
+      receiptPath: null,
+      sha256: null,
+    };
+  }
+
+  let rawText: string;
   try {
-    rawText = await readFile(filePath, "utf8");
+    rawText = await readFile(intakePath, "utf8");
   } catch (err) {
-    await appendWatcherLog(params.paths.logPath, {
+    return finalizeMovedOutcome({
+      disposition: "failed",
       filename,
-      reason: `read_error:${normalizeErrorMessage(err)}`,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "unexpected_internal_error",
+      reasonDetail: `read_error:${normalizeErrorMessage(err)}`,
       status: "failed",
-      timestamp: nowIso(),
+      targetDir: params.paths.failedDir,
     });
-    return "failed";
   }
 
-  let rawJson: Record<string, unknown>;
+  let rawJson: unknown;
   try {
-    rawJson = JSON.parse(rawText) as Record<string, unknown>;
+    rawJson = JSON.parse(rawText);
   } catch (err) {
-    await moveIntoDirectory(filePath, params.paths.failedDir);
-    await appendWatcherLog(params.paths.logPath, {
+    return finalizeMovedOutcome({
+      disposition: "failed",
       filename,
-      reason: `invalid_json:${normalizeErrorMessage(err)}`,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "invalid_json",
+      reasonDetail: normalizeErrorMessage(err),
       status: "failed",
-      timestamp: nowIso(),
+      targetDir: params.paths.failedDir,
     });
-    return "failed";
   }
 
-  if (rawJson.schema_version !== STATE_SCHEMA_VERSION) {
-    await moveIntoDirectory(filePath, params.paths.failedDir);
-    await appendWatcherLog(params.paths.logPath, {
+  const rawRecord =
+    typeof rawJson === "object" && rawJson !== null ? (rawJson as Record<string, unknown>) : null;
+  if (rawRecord?.schema_version !== "v0") {
+    return finalizeMovedOutcome({
+      disposition: "failed",
       filename,
-      reason: `unsupported_schema_version:${JSON.stringify(rawJson.schema_version)}`,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "schema_version_invalid",
+      reasonDetail: JSON.stringify(rawRecord?.schema_version ?? null),
       status: "failed",
-      timestamp: nowIso(),
+      targetDir: params.paths.failedDir,
     });
-    return "failed";
   }
 
-  const fileHash = await hashFileContents(filePath);
-  if (params.state.processed_hashes[fileHash]) {
-    await moveIntoDirectory(filePath, params.paths.processedDir);
-    await appendWatcherLog(params.paths.logPath, {
+  try {
+    parseSubmitTaskEnvelopeV0(rawJson);
+  } catch (err) {
+    return finalizeMovedOutcome({
+      disposition: "failed",
       filename,
-      reason: `duplicate_sha256:${fileHash}`,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "schema_invalid",
+      reasonDetail: normalizeErrorMessage(err),
+      status: "failed",
+      targetDir: params.paths.failedDir,
+    });
+  }
+
+  const sha256 = await hashFileContents(intakePath);
+  const hasOverride = Boolean(params.state.reprocess_overrides[sha256]);
+  if (params.state.processed_hashes[sha256] && !hasOverride) {
+    return finalizeMovedOutcome({
+      disposition: "skipped",
+      filename,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "duplicate",
+      reasonDetail: sha256,
+      sha256,
       status: "skipped",
-      timestamp: nowIso(),
+      targetDir: params.paths.processedDir,
     });
-    return "skipped";
   }
 
   try {
     await resetLifecycleOutputDir(params.paths.lifecycleOutputDir);
-    await runInterbeingE2ELocalV0({
-      inputPath: filePath,
+    await params.runLifecycle({
+      inputPath: intakePath,
       interbeingDir: params.interbeingDir,
       outputDir: params.paths.lifecycleOutputDir,
     });
-    params.state.processed_hashes[fileHash] = {
-      filename,
-      processed_at: nowIso(),
-    };
-    await writeWatcherState(params.paths.statePath, params.state);
-    await moveIntoDirectory(filePath, params.paths.processedDir);
-    await appendWatcherLog(params.paths.logPath, {
-      filename,
-      reason: `processed_sha256:${fileHash}`,
-      status: "processed",
-      timestamp: nowIso(),
-    });
-    return "processed";
   } catch (err) {
-    await moveIntoDirectory(filePath, params.paths.failedDir);
-    await appendWatcherLog(params.paths.logPath, {
+    return finalizeMovedOutcome({
+      disposition: "failed",
       filename,
-      reason: `processing_error:${normalizeErrorMessage(err)}`,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "processing_error",
+      reasonDetail: normalizeErrorMessage(err),
+      sha256,
       status: "failed",
-      timestamp: nowIso(),
+      targetDir: params.paths.failedDir,
     });
-    return "failed";
   }
-}
 
-async function listIncomingFiles(incomingDir: string): Promise<string[]> {
-  const entries = await readdir(incomingDir, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(incomingDir, entry.name))
-    .filter((filePath) => isTaskEnvelopeFile(filePath))
-    .toSorted((left, right) => left.localeCompare(right));
+  const nextState: InterbeingWatcherV0State = {
+    schema_version: params.state.schema_version,
+    processed_hashes: {
+      ...params.state.processed_hashes,
+      [sha256]: {
+        filename,
+        processed_at: nowIso(),
+      },
+    },
+    reprocess_overrides: { ...params.state.reprocess_overrides },
+  };
+  if (hasOverride) {
+    delete nextState.reprocess_overrides[sha256];
+  }
+
+  try {
+    await writeWatcherState(params.paths.statePath, nextState);
+    params.state.processed_hashes = nextState.processed_hashes;
+    params.state.reprocess_overrides = nextState.reprocess_overrides;
+  } catch (err) {
+    return finalizeMovedOutcome({
+      disposition: "failed",
+      filename,
+      intakePath,
+      intakeTimestamp,
+      paths: params.paths,
+      reasonCode: "state_error",
+      reasonDetail: normalizeErrorMessage(err),
+      sha256,
+      status: "failed",
+      targetDir: params.paths.failedDir,
+    });
+  }
+
+  return finalizeMovedOutcome({
+    disposition: "processed",
+    filename,
+    intakePath,
+    intakeTimestamp,
+    paths: params.paths,
+    reasonCode: "processed",
+    sha256,
+    status: "processed",
+    targetDir: params.paths.processedDir,
+  });
 }
 
 async function processQueue(params: {
   interbeingDir: string;
+  observedPartials: Set<string>;
   paths: InterbeingWatcherV0Paths;
+  phase: "startup" | "watch";
+  runLifecycle: NonNullable<InterbeingWatcherV0Options["runLifecycle"]>;
   state: InterbeingWatcherV0State;
   summary: InterbeingWatcherV0Summary;
 }): Promise<void> {
-  const files = await listIncomingFiles(params.paths.incomingDir);
+  let files: string[];
+  try {
+    await logIgnoredPartialsInQueue({
+      incomingDir: params.paths.incomingDir,
+      observedPartials: params.observedPartials,
+      paths: params.paths,
+    });
+    files = await listEnvelopeFiles(params.paths.incomingDir);
+  } catch (err) {
+    await appendWatcherLog(
+      params.paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename: params.phase === "startup" ? "<startup-scan>" : "<watch-scan>",
+        paths: params.paths,
+        reasonCode: "startup_scan_error",
+        reasonDetail: normalizeErrorMessage(err),
+        status: "failed",
+      }),
+    );
+    throw err;
+  }
+
   for (const filePath of files) {
     const outcome = await processSingleFile({
       filePath,
       interbeingDir: params.interbeingDir,
       paths: params.paths,
+      runLifecycle: params.runLifecycle,
       state: params.state,
     });
-    params.summary[outcome] += 1;
+    params.summary[outcome.disposition] += 1;
+  }
+}
+
+export async function getInterbeingWatcherV0Status(
+  options: { cwd?: string; paths?: Partial<InterbeingWatcherV0Paths> } = {},
+): Promise<InterbeingWatcherV0StatusSummary> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return summarizeWatcherStatus(paths);
+}
+
+export async function listInterbeingWatcherV0Items(
+  options: { cwd?: string; limit?: number; paths?: Partial<InterbeingWatcherV0Paths> } = {},
+): Promise<{ items: unknown[]; tool_name: string; watcher_version: string }> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return listRecentWatcherReceipts(paths, options.limit ?? 10);
+}
+
+export async function verifyInterbeingWatcherV0(
+  options: {
+    cwd?: string;
+    filename?: string;
+    paths?: Partial<InterbeingWatcherV0Paths>;
+    sha256?: string;
+  } = {},
+): Promise<InterbeingWatcherV0VerifySummary> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return verifyWatcherArtifact(paths, {
+    filename: options.filename,
+    sha256: options.sha256,
+  });
+}
+
+export async function replayInterbeingWatcherV0(options: {
+  cwd?: string;
+  file: string;
+  forceReprocess?: boolean;
+  paths?: Partial<InterbeingWatcherV0Paths>;
+}): Promise<ReturnType<typeof queueReplayIntoIncoming> extends Promise<infer T> ? T : never> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  try {
+    return await queueReplayIntoIncoming({
+      filePath: options.file,
+      forceReprocess: options.forceReprocess,
+      paths,
+    });
+  } catch (err) {
+    const detail = normalizeErrorMessage(err);
+    await appendWatcherLog(
+      paths.logPath,
+      createLogEntry({
+        action: "replay",
+        filename: path.basename(options.file),
+        finalPath: null,
+        paths,
+        reasonCode: detail.includes("--force-reprocess")
+          ? "duplicate"
+          : "unexpected_internal_error",
+        reasonDetail: detail,
+        status: "failed",
+      }),
+    );
+    throw err;
   }
 }
 
@@ -324,8 +579,26 @@ export async function runInterbeingWatcherV0(
     ...options.paths,
   };
   const interbeingDir = path.resolve(options.interbeingDir ?? DEFAULT_INTERBEING_DIR);
-  await ensureRuntimePaths(paths);
-  const state = await readWatcherState(paths.statePath);
+  const runLifecycle = options.runLifecycle ?? runInterbeingE2ELocalV0;
+  await ensureWatcherRuntimePaths(paths);
+
+  let state: InterbeingWatcherV0State;
+  try {
+    state = await readWatcherState(paths.statePath);
+  } catch (err) {
+    await appendWatcherLog(
+      paths.logPath,
+      createLogEntry({
+        action: "intake",
+        filename: "<state>",
+        paths,
+        reasonCode: "state_error",
+        reasonDetail: normalizeErrorMessage(err),
+        status: "failed",
+      }),
+    );
+    throw err;
+  }
 
   const summary: InterbeingWatcherV0Summary = {
     mode: options.mode,
@@ -333,8 +606,17 @@ export async function runInterbeingWatcherV0(
     skipped: 0,
     failed: 0,
   };
+  const observedPartials = new Set<string>();
 
-  await processQueue({ interbeingDir, paths, state, summary });
+  await processQueue({
+    interbeingDir,
+    observedPartials,
+    paths,
+    phase: "startup",
+    runLifecycle,
+    state,
+    summary,
+  });
   if (options.onIdle) {
     await options.onIdle();
   }
@@ -360,9 +642,10 @@ export async function runInterbeingWatcherV0(
           filePath: next,
           interbeingDir,
           paths,
+          runLifecycle,
           state,
         });
-        summary[outcome] += 1;
+        summary[outcome.disposition] += 1;
       }
     } finally {
       draining = false;
@@ -382,6 +665,10 @@ export async function runInterbeingWatcherV0(
   });
 
   watcher.on("add", (filePath) => {
+    if (isPartialTaskEnvelopeFile(filePath)) {
+      void logIgnoredPartial({ filePath, observedPartials, paths });
+      return;
+    }
     if (!isTaskEnvelopeFile(filePath)) {
       return;
     }
@@ -389,6 +676,10 @@ export async function runInterbeingWatcherV0(
     void drain();
   });
   watcher.on("change", (filePath) => {
+    if (isPartialTaskEnvelopeFile(filePath)) {
+      void logIgnoredPartial({ filePath, observedPartials, paths });
+      return;
+    }
     if (!isTaskEnvelopeFile(filePath)) {
       return;
     }
@@ -408,7 +699,15 @@ export async function runInterbeingWatcherV0(
     watcher.once("ready", onReady);
     watcher.once("error", onError);
   });
-  await processQueue({ interbeingDir, paths, state, summary });
+  await processQueue({
+    interbeingDir,
+    observedPartials,
+    paths,
+    phase: "startup",
+    runLifecycle,
+    state,
+    summary,
+  });
   if (options.onIdle) {
     await options.onIdle();
   }
