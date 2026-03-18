@@ -1,0 +1,7 @@
+workspace/audit/_evidence/dali-interbeing-alignment/branch-stack-summary.md
+workspace/audit/_evidence/dali-interbeing-alignment/changed-files.txt
+workspace/audit/_evidence/dali-interbeing-alignment/contract-alignment-matrix.md
+workspace/audit/_evidence/dali-interbeing-alignment/git-status.txt
+workspace/audit/_evidence/dali-interbeing-alignment/interbeing-handoff.md
+workspace/audit/_evidence/dali-interbeing-alignment/merge-readiness.md
+workspace/audit/_evidence/dali-interbeing-alignment/rollback-notes.md
