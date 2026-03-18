@@ -5,6 +5,10 @@ Derived from:
 Role:
 Operator / orchestration node within the OpenClaw ecosystem.
 
+Source remains the shared substrate and contract layer.
+This repo carries Dali-owned orchestration surfaces and local adapters on top of that shared base.
+This pass imports `hooks/telegram-dali-bootstrap/` and `config/vllm/dali_local_exec.yaml` as explicit Dali-owned surfaces.
+
 # 🦞 OpenClaw — Personal AI Assistant
 
 <p align="center">
