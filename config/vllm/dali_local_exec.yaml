@@ -1,4 +1,9 @@
 # Dali local execution vLLM template (no secrets).
+# Deployment contract:
+# - Keep callers pinned to `served_model_name` and `openai_compat.base_url`.
+# - Override host/port or export a different compatibility URL at deploy time
+#   instead of baking repo-local launcher assumptions into callers.
+# - `api_key_env` is the intended secret injection point for this surface.
 serve:
   host: 127.0.0.1
   port: 8001
@@ -11,6 +16,7 @@ serve:
   disable_log_requests: true
 
 openai_compat:
+  # Default local compatibility endpoint for this profile.
   base_url: http://127.0.0.1:8001/v1
   model: local-exec-coordinator
 

@@ -1,0 +1,7 @@
+config/vllm/dali_local_exec.yaml
+hooks/telegram-dali-bootstrap/HOOK.md
+hooks/telegram-dali-bootstrap/handler.ts
+workspace/audit/_evidence/dali-bootstrap-decoupling/changed-files.txt
+workspace/audit/_evidence/dali-bootstrap-decoupling/decoupling-audit.md
+workspace/audit/_evidence/dali-bootstrap-decoupling/git-status.txt
+workspace/audit/_evidence/dali-bootstrap-decoupling/rollback-notes.md

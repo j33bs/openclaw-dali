@@ -2,11 +2,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const TARGET_AGENT_ID = "telegram-dali";
-const OVERRIDES: Record<string, string> = {
-  "IDENTITY.md": "nodes/dali/bootstrap/IDENTITY.md",
-  "USER.md": "nodes/dali/bootstrap/USER.md",
-  "MEMORY.md": "nodes/dali/MEMORY.md",
+const DEFAULT_BOOTSTRAP_ROOT = path.join("nodes", "dali", "bootstrap");
+const DEFAULT_OVERRIDES: Record<string, string> = {
+  "IDENTITY.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "IDENTITY.md"),
+  "USER.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "USER.md"),
+  "MEMORY.md": path.join("nodes", "dali", "MEMORY.md"),
 };
+const OVERRIDE_ENV_NAMES: Record<string, string> = {
+  "IDENTITY.md": "OPENCLAW_DALI_BOOTSTRAP_IDENTITY_PATH",
+  "USER.md": "OPENCLAW_DALI_BOOTSTRAP_USER_PATH",
+  "MEMORY.md": "OPENCLAW_DALI_BOOTSTRAP_MEMORY_PATH",
+};
+const BOOTSTRAP_ROOT_ENV_NAME = "OPENCLAW_DALI_BOOTSTRAP_ROOT";
 
 type BootstrapFile = {
   name: string;
@@ -24,6 +31,26 @@ type BootstrapEvent = {
     bootstrapFiles?: BootstrapFile[];
   };
 };
+
+function readTrimmedEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+function resolveOverridePath(name: string): string | null {
+  const directEnvName = OVERRIDE_ENV_NAMES[name];
+  const directValue = directEnvName ? readTrimmedEnv(directEnvName) : null;
+  if (directValue) {
+    return directValue;
+  }
+
+  const bootstrapRoot = readTrimmedEnv(BOOTSTRAP_ROOT_ENV_NAME);
+  if (bootstrapRoot && (name === "IDENTITY.md" || name === "USER.md")) {
+    return path.join(bootstrapRoot, name);
+  }
+
+  return DEFAULT_OVERRIDES[name] ?? null;
+}
 
 async function loadOverride(
   workspaceDir: string,
@@ -64,7 +91,12 @@ export default async function telegramDaliBootstrapHook(event: BootstrapEvent) {
   }
 
   const replacements = new Map<string, BootstrapFile>();
-  for (const [name, relPath] of Object.entries(OVERRIDES)) {
+  // Compatibility order: file-specific env override, shared bootstrap root env, legacy repo-relative default.
+  for (const name of Object.keys(DEFAULT_OVERRIDES)) {
+    const relPath = resolveOverridePath(name);
+    if (!relPath) {
+      continue;
+    }
     const loaded = await loadOverride(workspaceDir, name, relPath);
     if (loaded) {
       replacements.set(name, loaded);
