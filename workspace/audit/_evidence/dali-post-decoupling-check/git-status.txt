@@ -1,0 +1,5 @@
+?? workspace/audit/_evidence/dali-post-decoupling-check/bootstrap-validation.md
+?? workspace/audit/_evidence/dali-post-decoupling-check/changed-files.txt
+?? workspace/audit/_evidence/dali-post-decoupling-check/coupling-scan.md
+?? workspace/audit/_evidence/dali-post-decoupling-check/git-status.txt
+?? workspace/audit/_evidence/dali-post-decoupling-check/notes.md
