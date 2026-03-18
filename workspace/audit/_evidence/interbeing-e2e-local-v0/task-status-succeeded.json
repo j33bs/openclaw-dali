@@ -1,0 +1,10 @@
+{
+  "schema_version": "v0",
+  "task_id": "task-local-e2e-001",
+  "node_id": "dali",
+  "status": "succeeded",
+  "updated_at": "2026-03-18T09:00:03Z",
+  "progress_message": "Local interbeing v0 harness completed successfully.",
+  "result_ref": null,
+  "error": null
+}

@@ -1,0 +1,10 @@
+scripts/dev/interbeing-e2e-local-v0.ts
+workspace/audit/_evidence/interbeing-e2e-local-v0/changed-files.txt
+workspace/audit/_evidence/interbeing-e2e-local-v0/e2e-notes.md
+workspace/audit/_evidence/interbeing-e2e-local-v0/event-envelope.json
+workspace/audit/_evidence/interbeing-e2e-local-v0/git-status.txt
+workspace/audit/_evidence/interbeing-e2e-local-v0/input-submit-task.json
+workspace/audit/_evidence/interbeing-e2e-local-v0/rollback-notes.md
+workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-queued.json
+workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-running.json
+workspace/audit/_evidence/interbeing-e2e-local-v0/task-status-succeeded.json

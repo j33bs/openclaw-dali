@@ -1,0 +1,3 @@
+## codex/feat/interbeing-e2e-local-v0
+?? scripts/dev/interbeing-e2e-local-v0.ts
+?? workspace/audit/_evidence/interbeing-e2e-local-v0/
