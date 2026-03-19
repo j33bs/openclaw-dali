@@ -1,0 +1,8 @@
+MainPID=1104207
+Result=success
+NRestarts=1
+ExecMainCode=0
+ExecMainStatus=0
+ActiveState=active
+SubState=running
+ActiveEnterTimestamp=Thu 2026-03-19 21:27:39 AEST

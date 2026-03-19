@@ -1,0 +1,13 @@
+
+> openclaw@2026.3.14 test /home/jeebs/src/openclaw-dali
+> node scripts/test-parallel.mjs -- test/interbeing-watcher-v0.test.ts
+
+
+ RUN  v4.1.0 /home/jeebs/src/openclaw-dali
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  21:30:45
+   Duration  10.50s (transform 4.74s, setup 8.30s, import 37ms, tests 2.08s, environment 0ms)
+

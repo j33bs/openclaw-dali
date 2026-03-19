@@ -1,0 +1,10 @@
+RestartUSec=5s
+TimeoutStartUSec=30s
+TimeoutStopUSec=30s
+MainPID=1104207
+Result=success
+NRestarts=1
+ActiveState=active
+SubState=running
+FragmentPath=/home/jeebs/.config/systemd/user/openclaw-interbeing-watcher.service
+UnitFileState=enabled

@@ -1,0 +1,21 @@
+git status --short
+pnpm exec vitest run test/interbeing-watcher-v0.test.ts --maxWorkers 1 --reporter=json --outputFile /tmp/interbeing-vitest.json
+timeout 90s pnpm test -- test/interbeing-watcher-v0.test.ts
+pnpm build
+pnpm test -- test/interbeing-watcher-v0.test.ts
+git diff --check
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts health
+systemctl --user show openclaw-interbeing-watcher.service -p ActiveState -p SubState -p Result -p MainPID -p NRestarts -p FragmentPath -p UnitFileState
+systemctl --user daemon-reload
+systemctl --user restart openclaw-interbeing-watcher.service
+systemctl --user show openclaw-interbeing-watcher.service -p ActiveState -p SubState -p Result -p MainPID -p NRestarts -p RestartUSec -p TimeoutStartUSec -p TimeoutStopUSec -p FragmentPath -p UnitFileState
+systemctl --user kill --signal=KILL openclaw-interbeing-watcher.service
+systemctl --user show openclaw-interbeing-watcher.service -p ActiveState -p SubState -p Result -p MainPID -p NRestarts -p ExecMainStatus -p ExecMainCode -p ActiveEnterTimestamp
+journalctl --user -u openclaw-interbeing-watcher.service -n 20 --no-pager
+cat > handoff/incoming/dali/2026-03-19T11-27-50Z--ops-service-proof.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --filename 2026-03-19T11-27-50Z--ops-service-proof.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts status
+cat > handoff/incoming/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --filename 2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts health
+scripts/committer "Interbeing: harden watcher service ops" scripts/interbeing/README.md scripts/interbeing/run_watcher_v0.ts scripts/interbeing/run_watcher_v0_service.sh scripts/interbeing/watch_handoff_v0.ts scripts/interbeing/watcher_v0_support.ts scripts/systemd/openclaw-interbeing-watcher.service test/interbeing-watcher-v0.test.ts

@@ -1,0 +1,21 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "found": true,
+  "query": {
+    "filename": "2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+    "sha256": null
+  },
+  "matches": [
+    {
+      "disposition": "failed",
+      "file": "handoff/failed/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T11:28:13.617Z",
+      "original_filename": "2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+      "reason_code": "schema_version_invalid",
+      "receipt_path": "handoff/failed/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.receipt.json",
+      "sha256": null,
+      "tracked_hash": false
+    }
+  ]
+}
