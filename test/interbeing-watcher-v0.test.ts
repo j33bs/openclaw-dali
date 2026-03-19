@@ -740,6 +740,7 @@ describe("interbeing watcher v0 hardening", () => {
         correlation_id: "corr-hop-limit-001",
         payload: createLocalDispatchPayload({
           role: "planner",
+          worker_limit: 3,
           lineage: {
             chain_id: "chain-hop-001",
             hop_count: 1,
@@ -782,6 +783,10 @@ describe("interbeing watcher v0 hardening", () => {
         chain_id: "chain-hop-001",
         hop_count: 1,
         max_hops: 1,
+      },
+      worker_pool: {
+        limit: 3,
+        max_in_flight: 0,
       },
     });
   });

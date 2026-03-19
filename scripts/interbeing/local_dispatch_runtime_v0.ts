@@ -307,6 +307,7 @@ function createBaseReceiptContext(params: {
 function buildChildLineage(
   parentTaskId: string,
   parentLineage: InterbeingWatcherV0ReceiptLineage,
+  workerLimit: number,
 ): InterbeingWatcherV0ReceiptLineage {
   const nextHop = parentLineage.hop_count + 1;
   if (parentLineage.max_hops != null && nextHop > parentLineage.max_hops) {
@@ -319,7 +320,7 @@ function buildChildLineage(
         reviewer_gate: null,
         role: "planner",
         worker_pool: {
-          limit: DEFAULT_WORKER_LIMIT,
+          limit: workerLimit,
           max_in_flight: 0,
         },
       },
@@ -337,6 +338,7 @@ function buildChildLineage(
 function normalizePlannerChild(
   envelope: InterbeingTaskEnvelopeV0,
   parentLineage: InterbeingWatcherV0ReceiptLineage,
+  workerLimit: number,
   value: unknown,
   index: number,
 ): NormalizedPlannerChildSpec {
@@ -353,7 +355,7 @@ function normalizePlannerChild(
       createBaseReceiptContext({
         lineage: parentLineage,
         role: "planner",
-        workerLimit: DEFAULT_WORKER_LIMIT,
+        workerLimit,
       }),
     );
   }
@@ -377,7 +379,7 @@ function normalizePlannerChild(
       record.input,
       `payload.local_dispatch.planner_children[${index}].input`,
     ),
-    lineage: buildChildLineage(envelope.task_id, parentLineage),
+    lineage: buildChildLineage(envelope.task_id, parentLineage, workerLimit),
     notes: asOptionalString(
       record.notes,
       `payload.local_dispatch.planner_children[${index}].notes`,
@@ -440,7 +442,7 @@ function normalizeLocalDispatchSpec(
       lineage,
       notes: asOptionalString(record.notes, `payload.${LOCAL_DISPATCH_KEY}.notes`),
       plannerChildren: plannerChildren.map((entry, index) =>
-        normalizePlannerChild(envelope, lineage, entry, index),
+        normalizePlannerChild(envelope, lineage, workerLimit, entry, index),
       ),
       result: asOptionalResultObject(record.result, `payload.${LOCAL_DISPATCH_KEY}.result`),
       role,
