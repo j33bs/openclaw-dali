@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
   replayInterbeingWatcherV0,
   runInterbeingWatcherV0,
@@ -174,12 +175,21 @@ describe("interbeing watcher v0 hardening", () => {
     });
 
     const status = await getInterbeingWatcherV0Status({ cwd });
-    expect(status.available_modes).toEqual(["once", "start", "status", "list", "verify", "replay"]);
+    expect(status.available_modes).toEqual([
+      "once",
+      "start",
+      "status",
+      "health",
+      "list",
+      "verify",
+      "replay",
+    ]);
     expect(status.counts).toMatchObject({
       incoming: 0,
       processed: 1,
       failed: 0,
     });
+    expect(status.state.readable).toBe(true);
     expect(status.state.tracked_hashes).toBe(1);
 
     const byFilename = await verifyInterbeingWatcherV0({
@@ -294,6 +304,117 @@ describe("interbeing watcher v0 hardening", () => {
     expect(
       (await readFile(paths.logPath, "utf8")).includes('"reason_code":"force_reprocess_requested"'),
     ).toBe(true);
+  });
+
+  it("reports service, lock, and recent failure diagnostics through the health surface", async () => {
+    const cwd = await createTempRepoRoot();
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({ task_id: "task-health-001", correlation_id: "corr-health-001" }),
+      filename: "health-check.task-envelope.v0.json",
+    });
+
+    await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async ({ outputDir }) => createSuccessfulLifecycleRunner(outputDir),
+    });
+
+    const health = await getInterbeingWatcherV0Health({
+      cwd,
+      deps: {
+        inspectLock: async () => ({
+          acquired_at: null,
+          age_seconds: null,
+          detail: null,
+          exists: false,
+          owner_command: null,
+          owner_matches_watcher: null,
+          path: "workspace/state/interbeing_watcher_v0.lock",
+          pid: null,
+          status: "absent",
+          tool_name: null,
+          watcher_version: null,
+        }),
+        inspectService: async () => ({
+          active_enter_timestamp: "Thu 2026-03-19 11:00:00 UTC",
+          active_state: "active",
+          available: true,
+          detail: null,
+          exec_main_code: "0",
+          exec_main_status: 0,
+          fragment_path: "scripts/systemd/openclaw-interbeing-watcher.service",
+          load_state: "loaded",
+          main_pid: 1234,
+          n_restarts: 1,
+          result: "success",
+          sub_state: "running",
+          unit: "openclaw-interbeing-watcher.service",
+          unit_file_state: "enabled",
+        }),
+        readJournalIssues: async () => ({
+          available: true,
+          detail: null,
+          errors: [],
+          unit: "openclaw-interbeing-watcher.service",
+          warnings: [
+            {
+              message: "watcher restarted",
+              priority: 4,
+              timestamp: "2026-03-19T11:01:00.000Z",
+            },
+          ],
+        }),
+        readRecentFailures: async () => [
+          {
+            action: "intake",
+            filename: "invalid-schema-version.task-envelope.v0.json",
+            reason_code: "schema_version_invalid",
+            reason_detail: '"v1"',
+            status: "failed",
+            timestamp: "2026-03-19T11:02:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(health.service.unit).toBe("openclaw-interbeing-watcher.service");
+    expect(health.service.fragment_path).toBe(
+      "scripts/systemd/openclaw-interbeing-watcher.service",
+    );
+    expect(health.watcher.counts.processed).toBe(1);
+    expect(health.watcher.lock.status).toBe("absent");
+    expect(health.watcher.state.readable).toBe(true);
+    expect(health.watcher.recent_failures).toHaveLength(1);
+    expect(health.health.status).toBe("warning");
+    expect(health.health.issues).toContain("service_restarts:1");
+    expect(health.health.issues).toContain("journal_warnings:1");
+    expect(health.health.issues).toContain("recent_failures:1");
+  });
+
+  it("clears stale lock files left behind by dead processes", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    const lockPath = resolveWatcherLockPath(paths);
+    await mkdir(path.dirname(lockPath), { recursive: true });
+    await writeFile(
+      lockPath,
+      `${JSON.stringify({
+        pid: 999_999_999,
+        acquired_at: "2026-03-19T11:03:00.000Z",
+        tool_name: "interbeing-watcher-v0",
+        watcher_version: "v0-hardening",
+      })}\n`,
+      "utf8",
+    );
+
+    const order: string[] = [];
+    await withWatcherMutationLock(paths, async () => {
+      order.push("acquired");
+    });
+
+    expect(order).toEqual(["acquired"]);
+    await expect(readFile(lockPath, "utf8")).rejects.toThrow();
   });
 
   it("serializes queue mutations through the watcher lock file", async () => {

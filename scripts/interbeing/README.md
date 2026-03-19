@@ -10,6 +10,8 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
   Processes the current queue and exits.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts status`
   Prints a machine-readable JSON status summary for operator or SSH use.
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts health`
+  Prints service, lock, queue, state, and recent failure diagnostics as machine-readable JSON.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts list --limit 10`
   Lists recent processed, failed, and skipped receipts.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts verify --filename <name>`
@@ -70,6 +72,7 @@ systemctl --user enable --now openclaw-interbeing-watcher.service
 systemctl --user stop openclaw-interbeing-watcher.service
 systemctl --user restart openclaw-interbeing-watcher.service
 systemctl --user status openclaw-interbeing-watcher.service --no-pager
+jq . < <(pnpm tsx scripts/interbeing/run_watcher_v0.ts health)
 journalctl --user -u openclaw-interbeing-watcher.service -n 200 --no-pager
 systemctl --user disable --now openclaw-interbeing-watcher.service
 ```
@@ -77,9 +80,12 @@ systemctl --user disable --now openclaw-interbeing-watcher.service
 Notes:
 
 - The unit assumes the Dali checkout lives at `~/src/openclaw-dali`.
+- The service follows the repo-standard long-running user-unit envelope: `Restart=always`, `RestartSec=5`, `TimeoutStartSec=30`, `TimeoutStopSec=30`.
 - `once` remains available for bounded recovery or smoke checks, but the service is the normal operator surface for continuous intake.
 - Replay and `--force-reprocess` remain valid while the service is running; queue mutation is serialized through `workspace/state/interbeing_watcher_v0.lock` so state updates are not clobbered by the long-running watcher.
+- The lock file is crash-recoverable. A dead owner PID is cleared automatically, and a live PID is only treated as stale when it is clearly not a watcher process. Anything ambiguous remains fail-closed and operator-visible through `health`.
 - `status`, `list`, and `verify` stay read-only and can be run while the service is active.
+- `health` is the fastest operator diagnostic. It reports the installed unit path, service state, restart count, watched paths, queue depth, lock state, state-file readability, last processed or failed timestamps, and recent journal or watcher-log failures.
 
 ## Failure Taxonomy
 

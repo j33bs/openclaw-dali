@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFile,
@@ -22,6 +23,17 @@ export const WATCHER_TEMP_EXTENSION = ".partial";
 export const WATCHER_STATE_FILENAME = "interbeing_watcher_v0.json";
 export const WATCHER_LOG_FILENAME = "interbeing_watcher_v0.log";
 export const WATCHER_LOCK_FILENAME = "interbeing_watcher_v0.lock";
+export const WATCHER_SYSTEMD_SERVICE_NAME = "openclaw-interbeing-watcher";
+export const WATCHER_LOCK_STALE_AGE_MS = 60_000;
+export const WATCHER_AVAILABLE_MODES = [
+  "once",
+  "start",
+  "status",
+  "health",
+  "list",
+  "verify",
+  "replay",
+] as const;
 
 export type InterbeingWatcherV0Mode = "once" | "start";
 export type InterbeingWatcherV0Disposition = "failed" | "processed" | "skipped";
@@ -147,9 +159,79 @@ export type InterbeingWatcherV0StatusSummary = {
     exists: boolean;
     path: string;
     pending_reprocess_overrides: number;
+    readable: boolean;
     tracked_hashes: number;
   };
   tool_name: string;
+  watcher_version: string;
+};
+
+export type InterbeingWatcherV0LockSummary = {
+  acquired_at: string | null;
+  age_seconds: number | null;
+  detail: string | null;
+  exists: boolean;
+  owner_command: string | null;
+  owner_matches_watcher: boolean | null;
+  path: string;
+  pid: number | null;
+  status: "absent" | "active" | "stale" | "unknown";
+  tool_name: string | null;
+  watcher_version: string | null;
+};
+
+export type InterbeingWatcherV0ServiceRuntimeSummary = {
+  active_enter_timestamp: string | null;
+  active_state: string | null;
+  available: boolean;
+  detail: string | null;
+  exec_main_code: string | null;
+  exec_main_status: number | null;
+  fragment_path: string | null;
+  load_state: string | null;
+  main_pid: number | null;
+  n_restarts: number | null;
+  result: string | null;
+  sub_state: string | null;
+  unit: string;
+  unit_file_state: string | null;
+};
+
+export type InterbeingWatcherV0JournalIssueSummary = {
+  message: string;
+  priority: number | null;
+  timestamp: string | null;
+};
+
+export type InterbeingWatcherV0JournalSummary = {
+  available: boolean;
+  detail: string | null;
+  errors: InterbeingWatcherV0JournalIssueSummary[];
+  unit: string;
+  warnings: InterbeingWatcherV0JournalIssueSummary[];
+};
+
+export type InterbeingWatcherV0RecentLogIssueSummary = {
+  action: InterbeingWatcherV0Action;
+  filename: string;
+  reason_code: InterbeingWatcherV0ReasonCode;
+  reason_detail: string | null;
+  status: InterbeingWatcherV0LogStatus;
+  timestamp: string;
+};
+
+export type InterbeingWatcherV0HealthSummary = {
+  health: {
+    issues: string[];
+    status: "error" | "ok" | "warning";
+  };
+  journal: InterbeingWatcherV0JournalSummary;
+  service: InterbeingWatcherV0ServiceRuntimeSummary;
+  tool_name: string;
+  watcher: InterbeingWatcherV0StatusSummary & {
+    lock: InterbeingWatcherV0LockSummary;
+    recent_failures: InterbeingWatcherV0RecentLogIssueSummary[];
+  };
   watcher_version: string;
 };
 
@@ -186,6 +268,29 @@ export type InterbeingWatcherV0ReplaySummary = {
 };
 
 type CandidateReceipt = Omit<InterbeingWatcherV0Receipt, "final_path" | "receipt_path">;
+
+type InterbeingWatcherV0LockRecord = {
+  acquired_at?: unknown;
+  pid?: unknown;
+  repo_root?: unknown;
+  tool_name?: unknown;
+  watcher_version?: unknown;
+};
+
+export type InterbeingWatcherV0HealthDeps = {
+  inspectLock?: (paths: InterbeingWatcherV0Paths) => Promise<InterbeingWatcherV0LockSummary>;
+  inspectService?: (
+    unit: string,
+    paths: InterbeingWatcherV0Paths,
+  ) => Promise<InterbeingWatcherV0ServiceRuntimeSummary>;
+  readRecentFailures?: (
+    paths: InterbeingWatcherV0Paths,
+  ) => Promise<InterbeingWatcherV0RecentLogIssueSummary[]>;
+  readJournalIssues?: (
+    unit: string,
+    paths: InterbeingWatcherV0Paths,
+  ) => Promise<InterbeingWatcherV0JournalSummary>;
+};
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -246,7 +351,13 @@ export function toRepoRelative(
   }
   const repoRoot = resolveWatcherRepoRoot(paths);
   const relative = path.relative(repoRoot, filePath);
-  return relative.length > 0 ? relative : ".";
+  if (relative.length === 0) {
+    return ".";
+  }
+  if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    return filePath;
+  }
+  return relative;
 }
 
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -286,30 +397,243 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-async function clearStaleWatcherLock(lockPath: string): Promise<boolean> {
+function summarizeCommandFailure(result: {
+  error?: Error;
+  signal?: NodeJS.Signals | null;
+  status?: number | null;
+  stderr?: string;
+  stdout?: string;
+}): string {
+  if (result.error) {
+    return normalizeErrorMessage(result.error);
+  }
+  if (result.signal) {
+    return `signal:${result.signal}`;
+  }
+  if (typeof result.status === "number" && result.status !== 0) {
+    return (result.stderr || result.stdout || `exit:${result.status}`).trim();
+  }
+  return "unknown_failure";
+}
+
+function resolveWatcherUnitName(unit = WATCHER_SYSTEMD_SERVICE_NAME): string {
+  return unit.endsWith(".service") ? unit : `${unit}.service`;
+}
+
+function asFiniteInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseLockTimestamp(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function computeLockAgeSeconds(mtimeMs: number | null): number | null {
+  if (mtimeMs == null) {
+    return null;
+  }
+  return Math.max(0, Math.floor((Date.now() - mtimeMs) / 1_000));
+}
+
+async function readLinuxProcessCommand(pid: number): Promise<string | null> {
+  if (process.platform !== "linux") {
+    return null;
+  }
+  try {
+    const raw = await readFile(`/proc/${pid}/cmdline`, "utf8");
+    const tokens = raw
+      .split("\u0000")
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    return tokens.length > 0 ? tokens.join(" ") : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWatcherOwnerCommand(command: string, repoRoot: string): boolean {
+  const normalized = command.replaceAll("\\", "/");
+  const expectedScript = path.join(repoRoot, "scripts", "interbeing", "run_watcher_v0.ts");
+  const expectedWrapper = path.join(repoRoot, "scripts", "interbeing", "run_watcher_v0_service.sh");
+  return (
+    normalized.includes(expectedScript.replaceAll("\\", "/")) ||
+    normalized.includes(expectedWrapper.replaceAll("\\", "/")) ||
+    normalized.includes("scripts/interbeing/run_watcher_v0.ts") ||
+    normalized.includes("scripts/interbeing/run_watcher_v0_service.sh")
+  );
+}
+
+export async function inspectWatcherLock(
+  paths: InterbeingWatcherV0Paths,
+): Promise<InterbeingWatcherV0LockSummary> {
+  const lockPath = resolveWatcherLockPath(paths);
+  const lockStats = await stat(lockPath).catch(() => null);
+  if (!lockStats) {
+    return {
+      acquired_at: null,
+      age_seconds: null,
+      detail: null,
+      exists: false,
+      owner_command: null,
+      owner_matches_watcher: null,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid: null,
+      status: "absent",
+      tool_name: null,
+      watcher_version: null,
+    };
+  }
+
+  const ageSeconds = computeLockAgeSeconds(lockStats.mtimeMs);
   let raw = "";
   try {
     raw = await readFile(lockPath, "utf8");
-  } catch {
-    return false;
+  } catch (err) {
+    return {
+      acquired_at: null,
+      age_seconds: ageSeconds,
+      detail: `read_error:${normalizeErrorMessage(err)}`,
+      exists: true,
+      owner_command: null,
+      owner_matches_watcher: null,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid: null,
+      status: "unknown",
+      tool_name: null,
+      watcher_version: null,
+    };
   }
 
+  let parsed: InterbeingWatcherV0LockRecord | null = null;
   try {
-    const parsed = JSON.parse(raw) as { pid?: unknown };
-    const pid = typeof parsed.pid === "number" ? parsed.pid : null;
-    if (pid != null && !isProcessAlive(pid)) {
-      await rm(lockPath, { force: true });
-      return true;
-    }
-    return false;
+    parsed = JSON.parse(raw) as InterbeingWatcherV0LockRecord;
   } catch {
-    const lockStats = await stat(lockPath).catch(() => null);
-    if (lockStats && Date.now() - lockStats.mtimeMs > 60_000) {
-      await rm(lockPath, { force: true });
-      return true;
+    return {
+      acquired_at: null,
+      age_seconds: ageSeconds,
+      detail:
+        ageSeconds != null && ageSeconds >= WATCHER_LOCK_STALE_AGE_MS / 1_000
+          ? "invalid_json_stale_lock"
+          : "invalid_json_lock",
+      exists: true,
+      owner_command: null,
+      owner_matches_watcher: null,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid: null,
+      status:
+        ageSeconds != null && ageSeconds >= WATCHER_LOCK_STALE_AGE_MS / 1_000 ? "stale" : "unknown",
+      tool_name: null,
+      watcher_version: null,
+    };
+  }
+
+  const pid = asFiniteInteger(parsed.pid);
+  const ownerCommand = pid != null ? await readLinuxProcessCommand(pid) : null;
+  const ownerMatchesWatcher =
+    ownerCommand == null
+      ? null
+      : isWatcherOwnerCommand(ownerCommand, resolveWatcherRepoRoot(paths));
+
+  if (pid == null) {
+    return {
+      acquired_at: parseLockTimestamp(parsed.acquired_at),
+      age_seconds: ageSeconds,
+      detail:
+        ageSeconds != null && ageSeconds >= WATCHER_LOCK_STALE_AGE_MS / 1_000
+          ? "missing_pid_stale_lock"
+          : "missing_pid",
+      exists: true,
+      owner_command: ownerCommand,
+      owner_matches_watcher: ownerMatchesWatcher,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid: null,
+      status:
+        ageSeconds != null && ageSeconds >= WATCHER_LOCK_STALE_AGE_MS / 1_000 ? "stale" : "unknown",
+      tool_name: typeof parsed.tool_name === "string" ? parsed.tool_name : null,
+      watcher_version: typeof parsed.watcher_version === "string" ? parsed.watcher_version : null,
+    };
+  }
+
+  if (!isProcessAlive(pid)) {
+    return {
+      acquired_at: parseLockTimestamp(parsed.acquired_at),
+      age_seconds: ageSeconds,
+      detail: "pid_not_running",
+      exists: true,
+      owner_command: ownerCommand,
+      owner_matches_watcher: ownerMatchesWatcher,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid,
+      status: "stale",
+      tool_name: typeof parsed.tool_name === "string" ? parsed.tool_name : null,
+      watcher_version: typeof parsed.watcher_version === "string" ? parsed.watcher_version : null,
+    };
+  }
+
+  if (ownerMatchesWatcher === false) {
+    if (
+      pid === process.pid &&
+      ageSeconds != null &&
+      ageSeconds < WATCHER_LOCK_STALE_AGE_MS / 1_000
+    ) {
+      return {
+        acquired_at: parseLockTimestamp(parsed.acquired_at),
+        age_seconds: ageSeconds,
+        detail: "lock_owned_by_current_process",
+        exists: true,
+        owner_command: ownerCommand,
+        owner_matches_watcher: ownerMatchesWatcher,
+        path: toRepoRelative(paths, lockPath) ?? lockPath,
+        pid,
+        status: "active",
+        tool_name: typeof parsed.tool_name === "string" ? parsed.tool_name : null,
+        watcher_version: typeof parsed.watcher_version === "string" ? parsed.watcher_version : null,
+      };
     }
+    return {
+      acquired_at: parseLockTimestamp(parsed.acquired_at),
+      age_seconds: ageSeconds,
+      detail: "pid_reused_by_non_watcher_process",
+      exists: true,
+      owner_command: ownerCommand,
+      owner_matches_watcher: ownerMatchesWatcher,
+      path: toRepoRelative(paths, lockPath) ?? lockPath,
+      pid,
+      status: "stale",
+      tool_name: typeof parsed.tool_name === "string" ? parsed.tool_name : null,
+      watcher_version: typeof parsed.watcher_version === "string" ? parsed.watcher_version : null,
+    };
+  }
+
+  return {
+    acquired_at: parseLockTimestamp(parsed.acquired_at),
+    age_seconds: ageSeconds,
+    detail: ownerMatchesWatcher == null ? "process_alive_but_owner_unverified" : null,
+    exists: true,
+    owner_command: ownerCommand,
+    owner_matches_watcher: ownerMatchesWatcher,
+    path: toRepoRelative(paths, lockPath) ?? lockPath,
+    pid,
+    status: ownerMatchesWatcher == null ? "unknown" : "active",
+    tool_name: typeof parsed.tool_name === "string" ? parsed.tool_name : null,
+    watcher_version: typeof parsed.watcher_version === "string" ? parsed.watcher_version : null,
+  };
+}
+
+async function clearStaleWatcherLock(paths: InterbeingWatcherV0Paths): Promise<boolean> {
+  const lock = await inspectWatcherLock(paths);
+  if (!lock.exists || lock.status !== "stale") {
     return false;
   }
+  await rm(resolveWatcherLockPath(paths), { force: true });
+  return true;
 }
 
 export async function withWatcherMutationLock<T>(
@@ -330,6 +654,7 @@ export async function withWatcherMutationLock<T>(
             {
               pid: process.pid,
               acquired_at: nowIso(),
+              repo_root: resolveWatcherRepoRoot(paths),
               tool_name: WATCHER_TOOL_NAME,
               watcher_version: WATCHER_TOOL_VERSION,
             },
@@ -347,7 +672,7 @@ export async function withWatcherMutationLock<T>(
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
         throw err;
       }
-      if (await clearStaleWatcherLock(lockPath)) {
+      if (await clearStaleWatcherLock(paths)) {
         continue;
       }
       await wait(100);
@@ -517,6 +842,221 @@ export async function listWatcherReceipts(
   });
 }
 
+async function inspectWatcherServiceRuntime(
+  unit: string,
+  paths: InterbeingWatcherV0Paths,
+): Promise<InterbeingWatcherV0ServiceRuntimeSummary> {
+  const resolvedUnit = resolveWatcherUnitName(unit);
+  const result = spawnSync(
+    "systemctl",
+    [
+      "--user",
+      "show",
+      resolvedUnit,
+      "--property=LoadState",
+      "--property=UnitFileState",
+      "--property=ActiveState",
+      "--property=SubState",
+      "--property=Result",
+      "--property=MainPID",
+      "--property=ExecMainStatus",
+      "--property=ExecMainCode",
+      "--property=NRestarts",
+      "--property=ActiveEnterTimestamp",
+      "--property=FragmentPath",
+    ],
+    {
+      cwd: resolveWatcherRepoRoot(paths),
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    },
+  );
+
+  if (result.status !== 0 || result.error) {
+    return {
+      active_enter_timestamp: null,
+      active_state: null,
+      available: false,
+      detail: summarizeCommandFailure(result),
+      exec_main_code: null,
+      exec_main_status: null,
+      fragment_path: null,
+      load_state: null,
+      main_pid: null,
+      n_restarts: null,
+      result: null,
+      sub_state: null,
+      unit: resolvedUnit,
+      unit_file_state: null,
+    };
+  }
+
+  const values = new Map<string, string>();
+  for (const line of result.stdout.split("\n")) {
+    if (!line.includes("=")) {
+      continue;
+    }
+    const index = line.indexOf("=");
+    values.set(line.slice(0, index), line.slice(index + 1));
+  }
+
+  const fragmentPath = values.get("FragmentPath") || null;
+  const loadState = values.get("LoadState") || null;
+  const available = loadState != null && loadState !== "not-found" && fragmentPath != null;
+
+  return {
+    active_enter_timestamp: values.get("ActiveEnterTimestamp") || null,
+    active_state: values.get("ActiveState") || null,
+    available,
+    detail: available ? null : "unit_not_found_or_not_loaded",
+    exec_main_code: values.get("ExecMainCode") || null,
+    exec_main_status: asFiniteInteger(values.get("ExecMainStatus")) ?? null,
+    fragment_path:
+      fragmentPath == null ? null : (toRepoRelative(paths, fragmentPath) ?? fragmentPath),
+    load_state: loadState,
+    main_pid: asFiniteInteger(values.get("MainPID")) ?? null,
+    n_restarts: asFiniteInteger(values.get("NRestarts")) ?? null,
+    result: values.get("Result") || null,
+    sub_state: values.get("SubState") || null,
+    unit: resolvedUnit,
+    unit_file_state: values.get("UnitFileState") || null,
+  };
+}
+
+function journalTimestampToIso(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
+  const micros = Number(value);
+  if (!Number.isFinite(micros)) {
+    return null;
+  }
+  return new Date(micros / 1_000).toISOString();
+}
+
+function normalizeJournalMessage(message: unknown): string {
+  if (typeof message === "string") {
+    return message;
+  }
+  if (message == null) {
+    return "<missing-message>";
+  }
+  try {
+    return JSON.stringify(message) ?? "<non-string-message>";
+  } catch {
+    return "<non-string-message>";
+  }
+}
+
+async function readWatcherJournalIssues(
+  unit: string,
+  paths: InterbeingWatcherV0Paths,
+): Promise<InterbeingWatcherV0JournalSummary> {
+  const resolvedUnit = resolveWatcherUnitName(unit);
+  const result = spawnSync(
+    "journalctl",
+    ["--user", "-u", resolvedUnit, "-n", "50", "--no-pager", "--output=json", "--priority=4"],
+    {
+      cwd: resolveWatcherRepoRoot(paths),
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    },
+  );
+
+  if (result.status !== 0 || result.error) {
+    return {
+      available: false,
+      detail: summarizeCommandFailure(result),
+      errors: [],
+      unit: resolvedUnit,
+      warnings: [],
+    };
+  }
+
+  const warnings: InterbeingWatcherV0JournalIssueSummary[] = [];
+  const errors: InterbeingWatcherV0JournalIssueSummary[] = [];
+  for (const line of result.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const message = parsed.MESSAGE;
+    const priority = asFiniteInteger(parsed.PRIORITY);
+    const issue = {
+      message: normalizeJournalMessage(message),
+      priority,
+      timestamp: journalTimestampToIso(parsed.__REALTIME_TIMESTAMP),
+    };
+    if (priority != null && priority <= 3) {
+      errors.push(issue);
+    } else {
+      warnings.push(issue);
+    }
+  }
+
+  return {
+    available: true,
+    detail: null,
+    errors: errors.slice(0, 10),
+    unit: resolvedUnit,
+    warnings: warnings.slice(0, 10),
+  };
+}
+
+async function readRecentWatcherFailures(
+  paths: InterbeingWatcherV0Paths,
+  limit = 5,
+): Promise<InterbeingWatcherV0RecentLogIssueSummary[]> {
+  if (!(await pathExists(paths.logPath))) {
+    return [];
+  }
+
+  const raw = await readFile(paths.logPath, "utf8");
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const issues: InterbeingWatcherV0RecentLogIssueSummary[] = [];
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    let parsed: Partial<InterbeingWatcherV0LogEntry>;
+    try {
+      parsed = JSON.parse(lines[index]) as Partial<InterbeingWatcherV0LogEntry>;
+    } catch {
+      continue;
+    }
+    if (parsed.status !== "failed" || typeof parsed.filename !== "string") {
+      continue;
+    }
+    if (
+      parsed.action !== "intake" ||
+      typeof parsed.reason_code !== "string" ||
+      typeof parsed.timestamp !== "string"
+    ) {
+      continue;
+    }
+    issues.push({
+      action: parsed.action,
+      filename: parsed.filename,
+      reason_code: parsed.reason_code,
+      reason_detail: typeof parsed.reason_detail === "string" ? parsed.reason_detail : null,
+      status: parsed.status,
+      timestamp: parsed.timestamp,
+    });
+    if (issues.length >= limit) {
+      break;
+    }
+  }
+
+  return issues;
+}
+
 export async function summarizeWatcherStatus(
   paths: InterbeingWatcherV0Paths,
 ): Promise<InterbeingWatcherV0StatusSummary> {
@@ -534,6 +1074,7 @@ export async function summarizeWatcherStatus(
   const issues: string[] = [];
   let trackedHashes = 0;
   let pendingOverrides = 0;
+  let stateReadable = true;
 
   if (stateExists) {
     try {
@@ -541,10 +1082,11 @@ export async function summarizeWatcherStatus(
       trackedHashes = Object.keys(state.processed_hashes).length;
       pendingOverrides = Object.keys(state.reprocess_overrides).length;
     } catch (err) {
+      stateReadable = false;
       issues.push(`state_error:${normalizeErrorMessage(err)}`);
     }
   }
-  if (!logExists) {
+  if (!logExists && receipts.length > 0) {
     issues.push("log_not_created_yet");
   }
   if (partial.length > 0) {
@@ -557,7 +1099,7 @@ export async function summarizeWatcherStatus(
   return {
     tool_name: WATCHER_TOOL_NAME,
     watcher_version: WATCHER_TOOL_VERSION,
-    available_modes: ["once", "start", "status", "list", "verify", "replay"],
+    available_modes: [...WATCHER_AVAILABLE_MODES],
     paths: {
       incoming: toRepoRelative(paths, paths.incomingDir) ?? paths.incomingDir,
       processed: toRepoRelative(paths, paths.processedDir) ?? paths.processedDir,
@@ -574,6 +1116,7 @@ export async function summarizeWatcherStatus(
       path: toRepoRelative(paths, paths.statePath) ?? paths.statePath,
       tracked_hashes: trackedHashes,
       pending_reprocess_overrides: pendingOverrides,
+      readable: stateReadable,
     },
     last_processed_timestamp: lastProcessed?.intake_timestamp ?? null,
     last_failed_timestamp: lastFailed?.intake_timestamp ?? null,
@@ -586,6 +1129,84 @@ export async function summarizeWatcherStatus(
           : "ok",
       issues,
     },
+  };
+}
+
+export async function summarizeWatcherHealth(
+  paths: InterbeingWatcherV0Paths,
+  deps: InterbeingWatcherV0HealthDeps = {},
+): Promise<InterbeingWatcherV0HealthSummary> {
+  const [watcher, lock, service, journal, recentFailures] = await Promise.all([
+    summarizeWatcherStatus(paths),
+    (deps.inspectLock ?? inspectWatcherLock)(paths),
+    (deps.inspectService ?? inspectWatcherServiceRuntime)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
+    (deps.readJournalIssues ?? readWatcherJournalIssues)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
+    (deps.readRecentFailures ?? readRecentWatcherFailures)(paths),
+  ]);
+
+  const issues = [...watcher.health.issues];
+
+  const serviceIsRunning =
+    service.available && service.active_state === "active" && service.sub_state === "running";
+  if (!service.available) {
+    issues.push(`service_status_unavailable:${service.detail ?? "unavailable"}`);
+  } else if (!serviceIsRunning) {
+    issues.push(
+      `service_inactive:${service.active_state ?? "unknown"}/${service.sub_state ?? "unknown"}`,
+    );
+  }
+
+  if ((service.n_restarts ?? 0) > 0) {
+    issues.push(`service_restarts:${service.n_restarts}`);
+  }
+  if (service.result && service.result !== "success") {
+    issues.push(`service_result:${service.result}`);
+  }
+  if (watcher.counts.incoming > 0) {
+    issues.push(`incoming_queue:${watcher.counts.incoming}`);
+  }
+  if (lock.status === "stale") {
+    issues.push(`lock_stale:${lock.detail ?? lock.path}`);
+  } else if (lock.status === "unknown") {
+    issues.push(`lock_unknown:${lock.detail ?? lock.path}`);
+  }
+  if (!journal.available) {
+    issues.push(`journal_unavailable:${journal.detail ?? "unavailable"}`);
+  } else {
+    if (journal.errors.length > 0) {
+      issues.push(`journal_errors:${journal.errors.length}`);
+    }
+    if (journal.warnings.length > 0) {
+      issues.push(`journal_warnings:${journal.warnings.length}`);
+    }
+  }
+  if (recentFailures.length > 0) {
+    issues.push(`recent_failures:${recentFailures.length}`);
+  }
+
+  const healthStatus =
+    watcher.health.status === "error" ||
+    (service.available && !serviceIsRunning) ||
+    lock.status === "stale"
+      ? "error"
+      : issues.length > 0
+        ? "warning"
+        : "ok";
+
+  return {
+    health: {
+      status: healthStatus,
+      issues,
+    },
+    journal,
+    service,
+    tool_name: WATCHER_TOOL_NAME,
+    watcher: {
+      ...watcher,
+      lock,
+      recent_failures: recentFailures,
+    },
+    watcher_version: WATCHER_TOOL_VERSION,
   };
 }
 

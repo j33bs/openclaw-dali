@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import {
+  getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
   listInterbeingWatcherV0Items,
   replayInterbeingWatcherV0,
@@ -14,6 +15,7 @@ type RunWatcherV0Options = {
 
 type ParsedCommand =
   | { kind: "watch"; mode: InterbeingWatcherV0Mode }
+  | { kind: "health" }
   | { kind: "status" }
   | { kind: "list"; limit: number }
   | { kind: "verify"; filename?: string; sha256?: string }
@@ -38,6 +40,9 @@ function parseCommand(argv: string[]): ParsedCommand {
   }
   if (command === "status") {
     return { kind: "status" };
+  }
+  if (command === "health") {
+    return { kind: "health" };
   }
   if (command === "list") {
     const rawLimit = readFlagValue(argv, "--limit");
@@ -67,7 +72,7 @@ function parseCommand(argv: string[]): ParsedCommand {
     };
   }
   throw new Error(
-    "Usage: pnpm tsx scripts/interbeing/run_watcher_v0.ts <start|once|status|list|verify|replay>",
+    "Usage: pnpm tsx scripts/interbeing/run_watcher_v0.ts <start|once|status|health|list|verify|replay>",
   );
 }
 
@@ -79,6 +84,8 @@ export async function runWatcherCliV0(options: RunWatcherV0Options = {}): Promis
         return runInterbeingWatcherV0({ mode: command.mode });
       case "status":
         return getInterbeingWatcherV0Status();
+      case "health":
+        return getInterbeingWatcherV0Health();
       case "list":
         return listInterbeingWatcherV0Items({ limit: command.limit });
       case "verify":

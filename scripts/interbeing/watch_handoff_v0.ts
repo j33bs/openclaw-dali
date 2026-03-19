@@ -20,6 +20,7 @@ import {
   queueReplayIntoIncoming,
   readWatcherState,
   resolveInterbeingWatcherV0Paths,
+  summarizeWatcherHealth,
   summarizeWatcherStatus,
   toRepoRelative,
   verifyWatcherArtifact,
@@ -28,6 +29,8 @@ import {
   writeReceiptForMovedFile,
   writeWatcherState,
   type InterbeingWatcherV0Disposition,
+  type InterbeingWatcherV0HealthDeps,
+  type InterbeingWatcherV0HealthSummary,
   type InterbeingWatcherV0LogEntry,
   type InterbeingWatcherV0Mode,
   type InterbeingWatcherV0Paths,
@@ -518,6 +521,21 @@ export async function getInterbeingWatcherV0Status(
   };
   await ensureWatcherRuntimePaths(paths);
   return summarizeWatcherStatus(paths);
+}
+
+export async function getInterbeingWatcherV0Health(
+  options: {
+    cwd?: string;
+    deps?: InterbeingWatcherV0HealthDeps;
+    paths?: Partial<InterbeingWatcherV0Paths>;
+  } = {},
+): Promise<InterbeingWatcherV0HealthSummary> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return summarizeWatcherHealth(paths, options.deps);
 }
 
 export async function listInterbeingWatcherV0Items(
