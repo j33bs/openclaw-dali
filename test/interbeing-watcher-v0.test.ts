@@ -29,6 +29,36 @@ type SubmitTaskEnvelope = {
   task_id: string;
 };
 
+type ReceiptWithLocalDispatch = {
+  final_disposition: string;
+  local_dispatch?: {
+    children: {
+      executed: number;
+      failed: number;
+      skipped_duplicates: number;
+      total: number;
+    } | null;
+    lineage: {
+      chain_id: string;
+      hop_count: number;
+      max_hops: number | null;
+      parent_role: string | null;
+      parent_task_id: string | null;
+    } | null;
+    reviewer_gate: {
+      approved: boolean | null;
+      required: boolean;
+      reviewer_task_id: string | null;
+    } | null;
+    role: string;
+    worker_pool: {
+      limit: number;
+      max_in_flight: number;
+    } | null;
+  };
+  reason_code: string;
+};
+
 const createdRoots: string[] = [];
 
 function createEnvelope(overrides: Partial<SubmitTaskEnvelope> = {}): SubmitTaskEnvelope {
@@ -42,6 +72,15 @@ function createEnvelope(overrides: Partial<SubmitTaskEnvelope> = {}): SubmitTask
     created_at: "2026-03-19T00:00:00Z",
     payload: { intent: "test" },
     ...overrides,
+  };
+}
+
+function createLocalDispatchPayload(
+  localDispatch: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    intent: "local-dispatch",
+    local_dispatch: localDispatch,
   };
 }
 
@@ -415,6 +454,336 @@ describe("interbeing watcher v0 hardening", () => {
 
     expect(order).toEqual(["acquired"]);
     await expect(readFile(lockPath, "utf8")).rejects.toThrow();
+  });
+
+  it("dispatches explicit executor and reviewer root roles through the default local runtime", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await Promise.all([
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          task_id: "task-role-executor-001",
+          correlation_id: "corr-role-executor-001",
+          payload: createLocalDispatchPayload({
+            role: "executor",
+            input: { objective: "run executor directly" },
+          }),
+        }),
+        filename: "root-executor.task-envelope.v0.json",
+      }),
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          task_id: "task-role-reviewer-001",
+          correlation_id: "corr-role-reviewer-001",
+          payload: createLocalDispatchPayload({
+            role: "reviewer",
+            approved: true,
+            notes: "approved by direct reviewer",
+          }),
+        }),
+        filename: "root-reviewer.task-envelope.v0.json",
+      }),
+    ]);
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 2,
+      skipped: 0,
+      failed: 0,
+    });
+
+    const executorReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.processedDir, "root-executor.task-envelope.v0.json")),
+    );
+    const reviewerReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.processedDir, "root-reviewer.task-envelope.v0.json")),
+    );
+
+    expect(executorReceipt.local_dispatch).toMatchObject({
+      role: "executor",
+      reviewer_gate: null,
+      worker_pool: null,
+    });
+    expect(reviewerReceipt.local_dispatch).toMatchObject({
+      role: "reviewer",
+      reviewer_gate: {
+        approved: true,
+        required: true,
+      },
+    });
+  });
+
+  it("runs planner child executors with bounded concurrency and records reviewer-approved lineage", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-planner-001",
+        correlation_id: "corr-planner-001",
+        payload: createLocalDispatchPayload({
+          role: "planner",
+          worker_limit: 2,
+          lineage: {
+            chain_id: "chain-planner-001",
+            hop_count: 0,
+            max_hops: 2,
+          },
+          planner_children: [
+            {
+              role: "executor",
+              task_id: "exec-a",
+              sleep_ms: 120,
+              input: { step: "a" },
+            },
+            {
+              role: "executor",
+              task_id: "exec-b",
+              sleep_ms: 120,
+              input: { step: "b" },
+            },
+            {
+              role: "reviewer",
+              task_id: "review-final",
+              approved: true,
+              notes: "planner chain approved",
+            },
+          ],
+        }),
+      }),
+      filename: "planner-chain.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 1,
+      skipped: 0,
+      failed: 0,
+    });
+
+    const processedReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.processedDir, "planner-chain.task-envelope.v0.json")),
+    );
+    expect(processedReceipt.local_dispatch).toMatchObject({
+      role: "planner",
+      children: {
+        total: 3,
+        executed: 3,
+        skipped_duplicates: 0,
+        failed: 0,
+      },
+      lineage: {
+        chain_id: "chain-planner-001",
+        hop_count: 0,
+        max_hops: 2,
+      },
+      reviewer_gate: {
+        approved: true,
+        required: true,
+        reviewer_task_id: "review-final",
+      },
+      worker_pool: {
+        limit: 2,
+        max_in_flight: 2,
+      },
+    });
+
+    const dispatchSummary = await readJsonFile<{
+      child_results: Array<{ role: string; status: string }>;
+      outcome: string;
+    }>(path.join(paths.lifecycleOutputDir, "dispatch-summary.json"));
+    expect(dispatchSummary.outcome).toBe("succeeded");
+    expect(dispatchSummary.child_results.map((child) => `${child.role}:${child.status}`)).toEqual([
+      "executor:succeeded",
+      "executor:succeeded",
+      "reviewer:succeeded",
+    ]);
+  });
+
+  it("skips duplicate planner child work before concurrent execution", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-planner-dup-001",
+        correlation_id: "corr-planner-dup-001",
+        payload: createLocalDispatchPayload({
+          role: "planner",
+          worker_limit: 2,
+          planner_children: [
+            {
+              role: "executor",
+              task_id: "exec-primary",
+              dedupe_key: "same-step",
+              input: { step: "same" },
+            },
+            {
+              role: "executor",
+              task_id: "exec-duplicate",
+              dedupe_key: "same-step",
+              input: { step: "same duplicate" },
+            },
+            {
+              role: "reviewer",
+              task_id: "review-dup",
+              approved: true,
+            },
+          ],
+        }),
+      }),
+      filename: "planner-duplicate-chain.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 1,
+      skipped: 0,
+      failed: 0,
+    });
+
+    const processedReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(
+        path.join(paths.processedDir, "planner-duplicate-chain.task-envelope.v0.json"),
+      ),
+    );
+    expect(processedReceipt.local_dispatch?.children).toMatchObject({
+      total: 3,
+      executed: 2,
+      skipped_duplicates: 1,
+      failed: 0,
+    });
+  });
+
+  it("fails closed when a reviewer gate rejects planner output", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-review-reject-001",
+        correlation_id: "corr-review-reject-001",
+        payload: createLocalDispatchPayload({
+          role: "planner",
+          worker_limit: 2,
+          planner_children: [
+            {
+              role: "executor",
+              task_id: "exec-review-target",
+              input: { step: "needs review" },
+            },
+            {
+              role: "reviewer",
+              task_id: "review-reject",
+              approved: false,
+              notes: "review failed",
+            },
+          ],
+        }),
+      }),
+      filename: "planner-review-reject.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+    });
+
+    const failedReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.failedDir, "planner-review-reject.task-envelope.v0.json")),
+    );
+    expect(failedReceipt).toMatchObject({
+      final_disposition: "failed",
+      reason_code: "reviewer_rejected",
+    });
+    expect(failedReceipt.local_dispatch).toMatchObject({
+      role: "planner",
+      reviewer_gate: {
+        approved: false,
+        required: true,
+        reviewer_task_id: "review-reject",
+      },
+    });
+  });
+
+  it("enforces hop limits before planner fan-out", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-hop-limit-001",
+        correlation_id: "corr-hop-limit-001",
+        payload: createLocalDispatchPayload({
+          role: "planner",
+          lineage: {
+            chain_id: "chain-hop-001",
+            hop_count: 1,
+            max_hops: 1,
+          },
+          planner_children: [
+            {
+              role: "executor",
+              task_id: "exec-hop-child",
+              input: { step: "should not run" },
+            },
+          ],
+        }),
+      }),
+      filename: "planner-hop-limit.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+    });
+
+    const failedReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.failedDir, "planner-hop-limit.task-envelope.v0.json")),
+    );
+    expect(failedReceipt).toMatchObject({
+      final_disposition: "failed",
+      reason_code: "hop_limit_exceeded",
+    });
+    expect(failedReceipt.local_dispatch).toMatchObject({
+      role: "planner",
+      lineage: {
+        chain_id: "chain-hop-001",
+        hop_count: 1,
+        max_hops: 1,
+      },
+    });
   });
 
   it("serializes queue mutations through the watcher lock file", async () => {

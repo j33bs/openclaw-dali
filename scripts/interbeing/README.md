@@ -91,20 +91,46 @@ Notes:
 
 Stable local reason codes:
 
+- `dispatch_invalid`
 - `processed`
 - `duplicate`
 - `partial_ignored`
 - `file_not_ready`
+- `hop_limit_exceeded`
 - `invalid_json`
 - `schema_invalid`
 - `schema_version_invalid`
 - `processing_error`
+- `reviewer_rejected`
 - `move_error`
 - `state_error`
 - `startup_scan_error`
 - `unexpected_internal_error`
 - `replay_requested`
 - `force_reprocess_requested`
+
+## Local Dispatch
+
+`payload.local_dispatch` is the Dali-local extension point for bounded multi-agent work. It does not change the canonical v0 envelope shape because it stays inside the already-opaque `payload` object.
+
+Supported roles:
+
+- `planner`
+- `executor`
+- `reviewer`
+
+Planner limits:
+
+- planner child fan-out is capped at `4`
+- worker concurrency is capped at `3`
+- planner children may be `executor` or `reviewer`, not nested `planner`
+- duplicate child work is skipped by `dedupe_key` or `task_id` before worker execution starts
+- if lineage metadata is present, child fan-out fails closed once `hop_count + 1 > max_hops`
+
+Receipt notes:
+
+- processed and failed receipts may now include `local_dispatch`
+- `local_dispatch` records the resolved role, lineage, worker-pool ceiling, child execution counts, and reviewer gate outcome when local dispatch ran
 
 ## Operator Workflow
 

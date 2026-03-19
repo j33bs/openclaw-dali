@@ -2,7 +2,11 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import chokidar from "chokidar";
 import { parseSubmitTaskEnvelopeV0 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
-import { DEFAULT_INTERBEING_DIR, runInterbeingE2ELocalV0 } from "../dev/interbeing-e2e-local-v0.ts";
+import { DEFAULT_INTERBEING_DIR } from "../dev/interbeing-e2e-local-v0.ts";
+import {
+  isInterbeingLocalDispatchError,
+  runInterbeingLocalDispatchV0,
+} from "./local_dispatch_runtime_v0.ts";
 import {
   WATCHER_TOOL_NAME,
   WATCHER_TOOL_VERSION,
@@ -35,6 +39,7 @@ import {
   type InterbeingWatcherV0Mode,
   type InterbeingWatcherV0Paths,
   type InterbeingWatcherV0ProcessResult,
+  type InterbeingWatcherV0ReceiptLocalDispatch,
   type InterbeingWatcherV0ReasonCode,
   type InterbeingWatcherV0State,
   type InterbeingWatcherV0StatusSummary,
@@ -59,6 +64,26 @@ export type InterbeingWatcherV0Options = {
 
 const STABILITY_DELAY_MS = 200;
 const STABILITY_POLLS = 3;
+
+function extractLifecycleReceiptContext(
+  value: unknown,
+): InterbeingWatcherV0ReceiptLocalDispatch | undefined {
+  if (typeof value !== "object" || value == null) {
+    return undefined;
+  }
+  const record = value as { receiptContext?: unknown };
+  if (typeof record.receiptContext !== "object" || record.receiptContext == null) {
+    return undefined;
+  }
+  return record.receiptContext as InterbeingWatcherV0ReceiptLocalDispatch;
+}
+
+function resolveLifecycleFailureReasonCode(err: unknown): InterbeingWatcherV0ReasonCode {
+  if (isInterbeingLocalDispatchError(err)) {
+    return err.reasonCode;
+  }
+  return "processing_error";
+}
 
 function createLogEntry(params: {
   action: InterbeingWatcherV0LogEntry["action"];
@@ -135,6 +160,7 @@ async function finalizeMovedOutcome(params: {
   filename: string;
   intakePath: string;
   intakeTimestamp: string;
+  localDispatch?: InterbeingWatcherV0ReceiptLocalDispatch;
   paths: InterbeingWatcherV0Paths;
   reasonCode: InterbeingWatcherV0ReasonCode;
   reasonDetail?: string | null;
@@ -186,6 +212,7 @@ async function finalizeMovedOutcome(params: {
       final_disposition: params.disposition,
       intake_path: toRepoRelative(params.paths, params.intakePath) ?? params.intakePath,
       intake_timestamp: params.intakeTimestamp,
+      ...(params.localDispatch == null ? {} : { local_dispatch: params.localDispatch }),
       original_filename: params.filename,
       reason_code: params.reasonCode,
       reason_detail: params.reasonDetail ?? null,
@@ -384,21 +411,24 @@ async function processSingleFile(params: {
     });
   }
 
+  let lifecycleReceiptContext: InterbeingWatcherV0ReceiptLocalDispatch | undefined;
   try {
     await resetLifecycleOutputDir(params.paths.lifecycleOutputDir);
-    await params.runLifecycle({
+    const lifecycleResult = await params.runLifecycle({
       inputPath: intakePath,
       interbeingDir: params.interbeingDir,
       outputDir: params.paths.lifecycleOutputDir,
     });
+    lifecycleReceiptContext = extractLifecycleReceiptContext(lifecycleResult);
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
       filename,
       intakePath,
       intakeTimestamp,
+      localDispatch: extractLifecycleReceiptContext(err),
       paths: params.paths,
-      reasonCode: "processing_error",
+      reasonCode: resolveLifecycleFailureReasonCode(err),
       reasonDetail: normalizeErrorMessage(err),
       sha256,
       status: "failed",
@@ -443,6 +473,7 @@ async function processSingleFile(params: {
     filename,
     intakePath,
     intakeTimestamp,
+    localDispatch: lifecycleReceiptContext,
     paths: params.paths,
     reasonCode: "processed",
     sha256,
@@ -613,7 +644,7 @@ export async function runInterbeingWatcherV0(
     ...options.paths,
   };
   const interbeingDir = path.resolve(options.interbeingDir ?? DEFAULT_INTERBEING_DIR);
-  const runLifecycle = options.runLifecycle ?? runInterbeingE2ELocalV0;
+  const runLifecycle = options.runLifecycle ?? runInterbeingLocalDispatchV0;
   await ensureWatcherRuntimePaths(paths);
 
   const summary: InterbeingWatcherV0Summary = {

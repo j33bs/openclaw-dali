@@ -40,20 +40,53 @@ export type InterbeingWatcherV0Disposition = "failed" | "processed" | "skipped";
 export type InterbeingWatcherV0LogStatus = InterbeingWatcherV0Disposition | "queued";
 export type InterbeingWatcherV0Action = "intake" | "replay";
 export type InterbeingWatcherV0ReasonCode =
+  | "dispatch_invalid"
   | "duplicate"
   | "file_not_ready"
+  | "hop_limit_exceeded"
   | "invalid_json"
   | "move_error"
   | "partial_ignored"
   | "processed"
   | "processing_error"
   | "replay_requested"
+  | "reviewer_rejected"
   | "force_reprocess_requested"
   | "schema_invalid"
   | "schema_version_invalid"
   | "startup_scan_error"
   | "state_error"
   | "unexpected_internal_error";
+
+export type InterbeingWatcherV0LocalDispatchRole = "executor" | "planner" | "reviewer";
+
+export type InterbeingWatcherV0ReceiptLineage = {
+  chain_id: string;
+  hop_count: number;
+  max_hops: number | null;
+  parent_role: InterbeingWatcherV0LocalDispatchRole | null;
+  parent_task_id: string | null;
+};
+
+export type InterbeingWatcherV0ReceiptLocalDispatch = {
+  children: {
+    executed: number;
+    failed: number;
+    skipped_duplicates: number;
+    total: number;
+  } | null;
+  lineage: InterbeingWatcherV0ReceiptLineage | null;
+  reviewer_gate: {
+    approved: boolean | null;
+    required: boolean;
+    reviewer_task_id: string | null;
+  } | null;
+  role: InterbeingWatcherV0LocalDispatchRole;
+  worker_pool: {
+    limit: number;
+    max_in_flight: number;
+  } | null;
+};
 
 export type InterbeingWatcherV0Paths = {
   failedDir: string;
@@ -107,6 +140,7 @@ export type InterbeingWatcherV0Receipt = {
   final_path: string;
   intake_path: string;
   intake_timestamp: string;
+  local_dispatch?: InterbeingWatcherV0ReceiptLocalDispatch;
   original_filename: string;
   reason_code: InterbeingWatcherV0ReasonCode;
   reason_detail: string | null;
