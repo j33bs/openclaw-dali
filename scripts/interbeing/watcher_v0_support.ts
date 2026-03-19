@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 export const WATCHER_TOOL_NAME = "interbeing-watcher-v0";
@@ -11,6 +21,7 @@ export const WATCHER_TASK_PATTERN = ".task-envelope.v0.json";
 export const WATCHER_TEMP_EXTENSION = ".partial";
 export const WATCHER_STATE_FILENAME = "interbeing_watcher_v0.json";
 export const WATCHER_LOG_FILENAME = "interbeing_watcher_v0.log";
+export const WATCHER_LOCK_FILENAME = "interbeing_watcher_v0.lock";
 
 export type InterbeingWatcherV0Mode = "once" | "start";
 export type InterbeingWatcherV0Disposition = "failed" | "processed" | "skipped";
@@ -251,6 +262,10 @@ export async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function resolveWatcherLockPath(paths: InterbeingWatcherV0Paths): string {
+  return path.join(path.dirname(paths.statePath), WATCHER_LOCK_FILENAME);
+}
+
 export async function ensureWatcherRuntimePaths(paths: InterbeingWatcherV0Paths): Promise<void> {
   await Promise.all([
     mkdir(paths.incomingDir, { recursive: true }),
@@ -260,6 +275,84 @@ export async function ensureWatcherRuntimePaths(paths: InterbeingWatcherV0Paths)
     mkdir(path.dirname(paths.logPath), { recursive: true }),
     mkdir(paths.lifecycleOutputDir, { recursive: true }),
   ]);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function clearStaleWatcherLock(lockPath: string): Promise<boolean> {
+  let raw = "";
+  try {
+    raw = await readFile(lockPath, "utf8");
+  } catch {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { pid?: unknown };
+    const pid = typeof parsed.pid === "number" ? parsed.pid : null;
+    if (pid != null && !isProcessAlive(pid)) {
+      await rm(lockPath, { force: true });
+      return true;
+    }
+    return false;
+  } catch {
+    const lockStats = await stat(lockPath).catch(() => null);
+    if (lockStats && Date.now() - lockStats.mtimeMs > 60_000) {
+      await rm(lockPath, { force: true });
+      return true;
+    }
+    return false;
+  }
+}
+
+export async function withWatcherMutationLock<T>(
+  paths: InterbeingWatcherV0Paths,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockPath = resolveWatcherLockPath(paths);
+  await mkdir(path.dirname(lockPath), { recursive: true });
+
+  // Keep queue mutation single-writer so long-running watch mode and
+  // operator-triggered replays cannot clobber the state file or double-run a payload.
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx");
+      try {
+        await handle.writeFile(
+          `${JSON.stringify(
+            {
+              pid: process.pid,
+              acquired_at: nowIso(),
+              tool_name: WATCHER_TOOL_NAME,
+              watcher_version: WATCHER_TOOL_VERSION,
+            },
+            null,
+            2,
+          )}\n`,
+          "utf8",
+        );
+        return await fn();
+      } finally {
+        await handle.close();
+        await rm(lockPath, { force: true });
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw err;
+      }
+      if (await clearStaleWatcherLock(lockPath)) {
+        continue;
+      }
+      await wait(100);
+    }
+  }
 }
 
 export async function readWatcherState(statePath: string): Promise<InterbeingWatcherV0State> {
@@ -614,58 +707,60 @@ export async function queueReplayIntoIncoming(params: {
   forceReprocess?: boolean;
   paths: InterbeingWatcherV0Paths;
 }): Promise<InterbeingWatcherV0ReplaySummary> {
-  const sourcePath = path.resolve(params.filePath);
-  const isFailedSource = sourcePath.startsWith(path.resolve(params.paths.failedDir) + path.sep);
-  const isProcessedSource = sourcePath.startsWith(
-    path.resolve(params.paths.processedDir) + path.sep,
-  );
-  if (!isFailedSource && !isProcessedSource) {
-    throw new Error(
-      "replay source must live under handoff/processed/dali/ or handoff/failed/dali/",
+  return await withWatcherMutationLock(params.paths, async () => {
+    const sourcePath = path.resolve(params.filePath);
+    const isFailedSource = sourcePath.startsWith(path.resolve(params.paths.failedDir) + path.sep);
+    const isProcessedSource = sourcePath.startsWith(
+      path.resolve(params.paths.processedDir) + path.sep,
     );
-  }
+    if (!isFailedSource && !isProcessedSource) {
+      throw new Error(
+        "replay source must live under handoff/processed/dali/ or handoff/failed/dali/",
+      );
+    }
 
-  if (!(await pathExists(sourcePath))) {
-    throw new Error(`replay source not found: ${sourcePath}`);
-  }
+    if (!(await pathExists(sourcePath))) {
+      throw new Error(`replay source not found: ${sourcePath}`);
+    }
 
-  const sha256 = await hashFileContents(sourcePath);
-  const state = await readWatcherState(params.paths.statePath);
-  const alreadyProcessed = Boolean(state.processed_hashes[sha256]);
-  if (alreadyProcessed && !params.forceReprocess) {
-    throw new Error("replay of a previously processed hash requires --force-reprocess");
-  }
-  if (params.forceReprocess) {
-    state.reprocess_overrides[sha256] = {
-      requested_at: nowIso(),
-      source_file: path.basename(sourcePath),
+    const sha256 = await hashFileContents(sourcePath);
+    const state = await readWatcherState(params.paths.statePath);
+    const alreadyProcessed = Boolean(state.processed_hashes[sha256]);
+    if (alreadyProcessed && !params.forceReprocess) {
+      throw new Error("replay of a previously processed hash requires --force-reprocess");
+    }
+    if (params.forceReprocess) {
+      state.reprocess_overrides[sha256] = {
+        requested_at: nowIso(),
+        source_file: path.basename(sourcePath),
+      };
+      await writeWatcherState(params.paths.statePath, state);
+    }
+
+    const queuedPath = await copyIntoDirectory(sourcePath, params.paths.incomingDir);
+    const reasonCode = params.forceReprocess ? "force_reprocess_requested" : "replay_requested";
+    await appendWatcherLog(params.paths.logPath, {
+      action: "replay",
+      filename: path.basename(sourcePath),
+      final_path: toRepoRelative(params.paths, queuedPath),
+      reason_code: reasonCode,
+      reason_detail: null,
+      receipt_path: null,
+      sha256,
+      status: "queued",
+      timestamp: nowIso(),
+      tool_name: WATCHER_TOOL_NAME,
+      watcher_version: WATCHER_TOOL_VERSION,
+    });
+
+    return {
+      tool_name: WATCHER_TOOL_NAME,
+      watcher_version: WATCHER_TOOL_VERSION,
+      force_reprocess: Boolean(params.forceReprocess),
+      queued_path: toRepoRelative(params.paths, queuedPath) ?? queuedPath,
+      reason_code: reasonCode,
+      sha256,
+      source_file: toRepoRelative(params.paths, sourcePath) ?? sourcePath,
     };
-    await writeWatcherState(params.paths.statePath, state);
-  }
-
-  const queuedPath = await copyIntoDirectory(sourcePath, params.paths.incomingDir);
-  const reasonCode = params.forceReprocess ? "force_reprocess_requested" : "replay_requested";
-  await appendWatcherLog(params.paths.logPath, {
-    action: "replay",
-    filename: path.basename(sourcePath),
-    final_path: toRepoRelative(params.paths, queuedPath),
-    reason_code: reasonCode,
-    reason_detail: null,
-    receipt_path: null,
-    sha256,
-    status: "queued",
-    timestamp: nowIso(),
-    tool_name: WATCHER_TOOL_NAME,
-    watcher_version: WATCHER_TOOL_VERSION,
   });
-
-  return {
-    tool_name: WATCHER_TOOL_NAME,
-    watcher_version: WATCHER_TOOL_VERSION,
-    force_reprocess: Boolean(params.forceReprocess),
-    queued_path: toRepoRelative(params.paths, queuedPath) ?? queuedPath,
-    reason_code: reasonCode,
-    sha256,
-    source_file: toRepoRelative(params.paths, sourcePath) ?? sourcePath,
-  };
 }

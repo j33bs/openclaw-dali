@@ -1,0 +1,41 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "found": true,
+  "query": {
+    "filename": null,
+    "sha256": "5cb68589cd2196c883b9746655bd1aa2827906f26dabb4f357a8a091e9453a17"
+  },
+  "matches": [
+    {
+      "disposition": "skipped",
+      "file": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof-duplicate.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T11:04:39.297Z",
+      "original_filename": "2026-03-19T11-04-13Z--service-autonomous-proof-duplicate.task-envelope.v0.json",
+      "reason_code": "duplicate",
+      "receipt_path": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof-duplicate.task-envelope.v0.receipt.json",
+      "sha256": "5cb68589cd2196c883b9746655bd1aa2827906f26dabb4f357a8a091e9453a17",
+      "tracked_hash": true
+    },
+    {
+      "disposition": "processed",
+      "file": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.1.json",
+      "intake_timestamp": "2026-03-19T11:05:00.276Z",
+      "original_filename": "2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json",
+      "reason_code": "processed",
+      "receipt_path": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.1.receipt.json",
+      "sha256": "5cb68589cd2196c883b9746655bd1aa2827906f26dabb4f357a8a091e9453a17",
+      "tracked_hash": true
+    },
+    {
+      "disposition": "processed",
+      "file": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T11:04:14.427Z",
+      "original_filename": "2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json",
+      "reason_code": "processed",
+      "receipt_path": "handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.receipt.json",
+      "sha256": "5cb68589cd2196c883b9746655bd1aa2827906f26dabb4f357a8a091e9453a17",
+      "tracked_hash": true
+    }
+  ]
+}

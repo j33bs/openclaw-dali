@@ -24,6 +24,7 @@ import {
   toRepoRelative,
   verifyWatcherArtifact,
   waitForStableFile,
+  withWatcherMutationLock,
   writeReceiptForMovedFile,
   writeWatcherState,
   type InterbeingWatcherV0Disposition,
@@ -248,7 +249,6 @@ async function processSingleFile(params: {
   interbeingDir: string;
   paths: InterbeingWatcherV0Paths;
   runLifecycle: NonNullable<InterbeingWatcherV0Options["runLifecycle"]>;
-  state: InterbeingWatcherV0State;
 }): Promise<InterbeingWatcherV0ProcessResult> {
   const intakePath = path.resolve(params.filePath);
   const filename = path.basename(intakePath);
@@ -364,8 +364,9 @@ async function processSingleFile(params: {
   }
 
   const sha256 = await hashFileContents(intakePath);
-  const hasOverride = Boolean(params.state.reprocess_overrides[sha256]);
-  if (params.state.processed_hashes[sha256] && !hasOverride) {
+  const state = await readWatcherState(params.paths.statePath);
+  const hasOverride = Boolean(state.reprocess_overrides[sha256]);
+  if (state.processed_hashes[sha256] && !hasOverride) {
     return finalizeMovedOutcome({
       disposition: "skipped",
       filename,
@@ -403,15 +404,15 @@ async function processSingleFile(params: {
   }
 
   const nextState: InterbeingWatcherV0State = {
-    schema_version: params.state.schema_version,
+    schema_version: state.schema_version,
     processed_hashes: {
-      ...params.state.processed_hashes,
+      ...state.processed_hashes,
       [sha256]: {
         filename,
         processed_at: nowIso(),
       },
     },
-    reprocess_overrides: { ...params.state.reprocess_overrides },
+    reprocess_overrides: { ...state.reprocess_overrides },
   };
   if (hasOverride) {
     delete nextState.reprocess_overrides[sha256];
@@ -419,8 +420,6 @@ async function processSingleFile(params: {
 
   try {
     await writeWatcherState(params.paths.statePath, nextState);
-    params.state.processed_hashes = nextState.processed_hashes;
-    params.state.reprocess_overrides = nextState.reprocess_overrides;
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
@@ -455,42 +454,59 @@ async function processQueue(params: {
   paths: InterbeingWatcherV0Paths;
   phase: "startup" | "watch";
   runLifecycle: NonNullable<InterbeingWatcherV0Options["runLifecycle"]>;
-  state: InterbeingWatcherV0State;
   summary: InterbeingWatcherV0Summary;
 }): Promise<void> {
-  let files: string[];
-  try {
-    await logIgnoredPartialsInQueue({
-      incomingDir: params.paths.incomingDir,
-      observedPartials: params.observedPartials,
-      paths: params.paths,
-    });
-    files = await listEnvelopeFiles(params.paths.incomingDir);
-  } catch (err) {
-    await appendWatcherLog(
-      params.paths.logPath,
-      createLogEntry({
-        action: "intake",
-        filename: params.phase === "startup" ? "<startup-scan>" : "<watch-scan>",
-        paths: params.paths,
-        reasonCode: "startup_scan_error",
-        reasonDetail: normalizeErrorMessage(err),
-        status: "failed",
-      }),
-    );
-    throw err;
-  }
+  await withWatcherMutationLock(params.paths, async () => {
+    try {
+      await readWatcherState(params.paths.statePath);
+    } catch (err) {
+      await appendWatcherLog(
+        params.paths.logPath,
+        createLogEntry({
+          action: "intake",
+          filename: "<state>",
+          paths: params.paths,
+          reasonCode: "state_error",
+          reasonDetail: normalizeErrorMessage(err),
+          status: "failed",
+        }),
+      );
+      throw err;
+    }
 
-  for (const filePath of files) {
-    const outcome = await processSingleFile({
-      filePath,
-      interbeingDir: params.interbeingDir,
-      paths: params.paths,
-      runLifecycle: params.runLifecycle,
-      state: params.state,
-    });
-    params.summary[outcome.disposition] += 1;
-  }
+    let files: string[];
+    try {
+      await logIgnoredPartialsInQueue({
+        incomingDir: params.paths.incomingDir,
+        observedPartials: params.observedPartials,
+        paths: params.paths,
+      });
+      files = await listEnvelopeFiles(params.paths.incomingDir);
+    } catch (err) {
+      await appendWatcherLog(
+        params.paths.logPath,
+        createLogEntry({
+          action: "intake",
+          filename: params.phase === "startup" ? "<startup-scan>" : "<watch-scan>",
+          paths: params.paths,
+          reasonCode: "startup_scan_error",
+          reasonDetail: normalizeErrorMessage(err),
+          status: "failed",
+        }),
+      );
+      throw err;
+    }
+
+    for (const filePath of files) {
+      const outcome = await processSingleFile({
+        filePath,
+        interbeingDir: params.interbeingDir,
+        paths: params.paths,
+        runLifecycle: params.runLifecycle,
+      });
+      params.summary[outcome.disposition] += 1;
+    }
+  });
 }
 
 export async function getInterbeingWatcherV0Status(
@@ -582,24 +598,6 @@ export async function runInterbeingWatcherV0(
   const runLifecycle = options.runLifecycle ?? runInterbeingE2ELocalV0;
   await ensureWatcherRuntimePaths(paths);
 
-  let state: InterbeingWatcherV0State;
-  try {
-    state = await readWatcherState(paths.statePath);
-  } catch (err) {
-    await appendWatcherLog(
-      paths.logPath,
-      createLogEntry({
-        action: "intake",
-        filename: "<state>",
-        paths,
-        reasonCode: "state_error",
-        reasonDetail: normalizeErrorMessage(err),
-        status: "failed",
-      }),
-    );
-    throw err;
-  }
-
   const summary: InterbeingWatcherV0Summary = {
     mode: options.mode,
     processed: 0,
@@ -614,7 +612,6 @@ export async function runInterbeingWatcherV0(
     paths,
     phase: "startup",
     runLifecycle,
-    state,
     summary,
   });
   if (options.onIdle) {
@@ -632,21 +629,22 @@ export async function runInterbeingWatcherV0(
     }
     draining = true;
     try {
-      while (pending.size > 0) {
-        const next = pending.values().next().value;
-        if (!next) {
-          break;
+      await withWatcherMutationLock(paths, async () => {
+        while (pending.size > 0) {
+          const next = pending.values().next().value;
+          if (!next) {
+            break;
+          }
+          pending.delete(next);
+          const outcome = await processSingleFile({
+            filePath: next,
+            interbeingDir,
+            paths,
+            runLifecycle,
+          });
+          summary[outcome.disposition] += 1;
         }
-        pending.delete(next);
-        const outcome = await processSingleFile({
-          filePath: next,
-          interbeingDir,
-          paths,
-          runLifecycle,
-          state,
-        });
-        summary[outcome.disposition] += 1;
-      }
+      });
     } finally {
       draining = false;
       if (options.onIdle) {
@@ -705,7 +703,6 @@ export async function runInterbeingWatcherV0(
     paths,
     phase: "startup",
     runLifecycle,
-    state,
     summary,
   });
   if (options.onIdle) {

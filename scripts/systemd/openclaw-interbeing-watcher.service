@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenClaw Interbeing Watcher v0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/openclaw-dali
+ExecStart=%h/src/openclaw-dali/scripts/interbeing/run_watcher_v0_service.sh start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+SuccessExitStatus=0 143
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

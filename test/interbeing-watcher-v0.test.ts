@@ -13,6 +13,8 @@ import {
   hashFileContents,
   readWatcherState,
   resolveInterbeingWatcherV0Paths,
+  resolveWatcherLockPath,
+  withWatcherMutationLock,
 } from "../scripts/interbeing/watcher_v0_support.ts";
 
 type SubmitTaskEnvelope = {
@@ -292,5 +294,28 @@ describe("interbeing watcher v0 hardening", () => {
     expect(
       (await readFile(paths.logPath, "utf8")).includes('"reason_code":"force_reprocess_requested"'),
     ).toBe(true);
+  });
+
+  it("serializes queue mutations through the watcher lock file", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    const order: string[] = [];
+
+    await Promise.all([
+      withWatcherMutationLock(paths, async () => {
+        order.push("first:start");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        order.push("first:end");
+      }),
+      (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await withWatcherMutationLock(paths, async () => {
+          order.push("second");
+        });
+      })(),
+    ]);
+
+    expect(order).toEqual(["first:start", "first:end", "second"]);
+    await expect(readFile(resolveWatcherLockPath(paths), "utf8")).rejects.toThrow();
   });
 });

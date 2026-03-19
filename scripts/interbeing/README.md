@@ -19,6 +19,8 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
   Copies a failed artifact back into intake.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts replay --file handoff/processed/dali/<file> --force-reprocess`
   Explicitly overrides idempotency once for a known processed hash.
+- `scripts/interbeing/run_watcher_v0_service.sh start`
+  Runs the long-lived watcher with an explicit repo-root working directory for systemd user service use.
 
 ## Local Paths
 
@@ -26,6 +28,7 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - processed: `handoff/processed/dali/`
 - failed: `handoff/failed/dali/`
 - state: `workspace/state/interbeing_watcher_v0.json`
+- mutation lock: `workspace/state/interbeing_watcher_v0.lock`
 - log: `workspace/audit/interbeing_watcher_v0.log`
 - lifecycle output: `workspace/audit/interbeing-watcher-v0/last-run/`
 
@@ -46,6 +49,37 @@ Receipt fields include:
 - references to local evidence paths when available
 
 Original envelope contents are never modified.
+
+## Service Mode
+
+`start` is already a long-running chokidar watcher, so the governed always-on form is a `systemd --user` service rather than a timer.
+
+Install the unit from this checkout:
+
+```bash
+mkdir -p ~/.config/systemd/user
+ln -sfn "$HOME/src/openclaw-dali/scripts/systemd/openclaw-interbeing-watcher.service" \
+  "$HOME/.config/systemd/user/openclaw-interbeing-watcher.service"
+systemctl --user daemon-reload
+```
+
+Operator control surface:
+
+```bash
+systemctl --user enable --now openclaw-interbeing-watcher.service
+systemctl --user stop openclaw-interbeing-watcher.service
+systemctl --user restart openclaw-interbeing-watcher.service
+systemctl --user status openclaw-interbeing-watcher.service --no-pager
+journalctl --user -u openclaw-interbeing-watcher.service -n 200 --no-pager
+systemctl --user disable --now openclaw-interbeing-watcher.service
+```
+
+Notes:
+
+- The unit assumes the Dali checkout lives at `~/src/openclaw-dali`.
+- `once` remains available for bounded recovery or smoke checks, but the service is the normal operator surface for continuous intake.
+- Replay and `--force-reprocess` remain valid while the service is running; queue mutation is serialized through `workspace/state/interbeing_watcher_v0.lock` so state updates are not clobbered by the long-running watcher.
+- `status`, `list`, and `verify` stay read-only and can be run while the service is active.
 
 ## Failure Taxonomy
 

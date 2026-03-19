@@ -1,0 +1,12 @@
+● openclaw-interbeing-watcher.service - OpenClaw Interbeing Watcher v0
+     Loaded: loaded (/home/jeebs/.config/systemd/user/openclaw-interbeing-watcher.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-03-19 21:03:51 AEST; 1min 46s ago
+   Main PID: 1097264 (node)
+      Tasks: 23 (limit: 38150)
+     Memory: 51.5M (peak: 58.6M)
+        CPU: 462ms
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/openclaw-interbeing-watcher.service
+             ├─1097264 node /home/jeebs/src/openclaw-dali/node_modules/.bin/../tsx/dist/cli.mjs /home/jeebs/src/openclaw-dali/scripts/interbeing/run_watcher_v0.ts start
+             └─1097290 /home/jeebs/.local/opt/node-v22.22.1-linux-x64/bin/node --require /home/jeebs/src/openclaw-dali/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx/dist/preflight.cjs --import file:///home/jeebs/src/openclaw-dali/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx/dist/loader.mjs /home/jeebs/src/openclaw-dali/scripts/interbeing/run_watcher_v0.ts start
+
+Mar 19 21:03:51 jeebs-Z490-AORUS-MASTER systemd[1713]: Started openclaw-interbeing-watcher.service - OpenClaw Interbeing Watcher v0.

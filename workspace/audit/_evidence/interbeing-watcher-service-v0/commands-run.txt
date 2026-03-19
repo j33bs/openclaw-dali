@@ -1,0 +1,19 @@
+git switch -c codex/harden/interbeing-watcher-service-v0
+pnpm build
+git diff --check
+pnpm test -- test/interbeing-watcher-v0.test.ts
+timeout 40s pnpm exec vitest run test/interbeing-watcher-v0.test.ts -t 'classifies invalid schema_version failures and writes a failed receipt' --maxWorkers 1 --reporter verbose
+mkdir -p ~/.config/systemd/user
+ln -sfn "$HOME/src/openclaw-dali/scripts/systemd/openclaw-interbeing-watcher.service" "$HOME/.config/systemd/user/openclaw-interbeing-watcher.service"
+systemctl --user daemon-reload
+systemctl --user enable --now openclaw-interbeing-watcher.service
+systemctl --user restart openclaw-interbeing-watcher.service
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts status
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts list --limit 5
+node --input-type=module - <<'EOF' ... write 2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json into handoff/incoming/dali/ ... EOF
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --filename 2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json
+cp handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json handoff/incoming/dali/2026-03-19T11-04-13Z--service-autonomous-proof-duplicate.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --sha256 5cb68589cd2196c883b9746655bd1aa2827906f26dabb4f357a8a091e9453a17
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts replay --file handoff/processed/dali/2026-03-19T11-04-13Z--service-autonomous-proof.task-envelope.v0.json --force-reprocess
+journalctl --user -u openclaw-interbeing-watcher.service -n 30 --no-pager
+
