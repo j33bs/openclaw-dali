@@ -1,20 +1,19 @@
 {
   "schema_version": "v0",
   "operation": "submit_task",
-  "task_id": "task-clawd-live-compat-002",
+  "task_id": "task-clawd-live-reviewer-001",
   "requestor": "c_lawd",
   "target_node": "dali",
-  "correlation_id": "corr-clawd-live-compat-002",
-  "created_at": "2026-03-19T12:44:30Z",
+  "correlation_id": "corr-clawd-live-reviewer-001",
+  "created_at": "2026-03-19T12:43:10Z",
   "payload": {
-    "task_type": "execution",
-    "prompt": "Execute the faithful C_Lawd local_dispatch compatibility proof after service restart.",
+    "intent": "clawd-local-dispatch-live-proof",
     "local_dispatch": {
-      "target_role": "executor",
-      "source_role": "planner",
-      "chain_id": "chain-clawd-live-compat-002",
-      "parent_task_id": "task-clawd-live-parent-002",
-      "hop_count": 1,
+      "target_role": "reviewer",
+      "source_role": "executor",
+      "chain_id": "chain-clawd-live-compat-001",
+      "parent_task_id": "task-exec-live-compat-001",
+      "hop_count": 2,
       "max_hops": 3
     }
   }
