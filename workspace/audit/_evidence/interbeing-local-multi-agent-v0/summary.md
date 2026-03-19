@@ -1,7 +1,7 @@
 # Interbeing Local Multi-Agent v0
 
 - Branch: `codex/harden/interbeing-watcher-service-ops-v1`
-- Implementation commit: `04c88bdd87efed1afb65c018506ee89e5015f2df`
+- Implementation commit: `04c88bdd87e27501e8fd30c66d72aedacb02e4b7`
 - Runtime model: watcher-owned intake plus adapter-local planner/executor/reviewer dispatch inside `payload.local_dispatch`
 - Reason: this keeps the canonical v0 envelope transport unchanged while adding bounded local role execution behind the watcher's existing queue, duplicate, replay, verify, and receipt authority.
 
