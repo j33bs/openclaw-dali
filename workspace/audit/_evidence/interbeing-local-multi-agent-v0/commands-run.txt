@@ -1,0 +1,15 @@
+git status --short --branch
+rg -n "interbeing|SubmitTaskEnvelope|task-envelope|lineage|hop|max_hop|parent_task|child_task|planner|executor|reviewer|worker pool|p-limit|concurrency" src scripts test docs -g '!dist'
+pnpm build
+pnpm test -- test/interbeing-watcher-v0.test.ts
+git diff --check
+scripts/committer "Interbeing: add local multi-agent dispatch" scripts/interbeing/README.md scripts/interbeing/local_dispatch_runtime_v0.ts scripts/interbeing/watch_handoff_v0.ts scripts/interbeing/watcher_v0_support.ts test/interbeing-watcher-v0.test.ts
+systemctl --user restart openclaw-interbeing-watcher.service
+systemctl --user show openclaw-interbeing-watcher.service -p ActiveState -p SubState -p Result -p MainPID -p NRestarts -p ActiveEnterTimestamp
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts health
+cat > handoff/incoming/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --filename 2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts status
+cat workspace/audit/interbeing-watcher-v0/last-run/dispatch-summary.json
+cat handoff/processed/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.receipt.json
+journalctl --user -u openclaw-interbeing-watcher.service -n 30 --no-pager

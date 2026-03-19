@@ -1,0 +1,108 @@
+{
+  "child_results": [
+    {
+      "approved": null,
+      "dedupe_key": "exec-b",
+      "lineage": {
+        "chain_id": "chain-local-multi-agent-proof-001",
+        "hop_count": 1,
+        "max_hops": 2,
+        "parent_role": "planner",
+        "parent_task_id": "task-local-multi-agent-proof-001"
+      },
+      "notes": null,
+      "output": null,
+      "role": "executor",
+      "status": "skipped_duplicate",
+      "task_id": "exec-b-duplicate"
+    },
+    {
+      "approved": null,
+      "dedupe_key": "exec-a",
+      "lineage": {
+        "chain_id": "chain-local-multi-agent-proof-001",
+        "hop_count": 1,
+        "max_hops": 2,
+        "parent_role": "planner",
+        "parent_task_id": "task-local-multi-agent-proof-001"
+      },
+      "notes": null,
+      "output": {
+        "acknowledged": true,
+        "input": {
+          "step": "a"
+        },
+        "lineage": {
+          "chain_id": "chain-local-multi-agent-proof-001",
+          "hop_count": 1,
+          "max_hops": 2,
+          "parent_role": "planner",
+          "parent_task_id": "task-local-multi-agent-proof-001"
+        },
+        "source_task_id": "task-local-multi-agent-proof-001",
+        "task_id": "exec-a"
+      },
+      "role": "executor",
+      "status": "succeeded",
+      "task_id": "exec-a"
+    },
+    {
+      "approved": null,
+      "dedupe_key": "exec-b",
+      "lineage": {
+        "chain_id": "chain-local-multi-agent-proof-001",
+        "hop_count": 1,
+        "max_hops": 2,
+        "parent_role": "planner",
+        "parent_task_id": "task-local-multi-agent-proof-001"
+      },
+      "notes": null,
+      "output": {
+        "acknowledged": true,
+        "input": {
+          "step": "b"
+        },
+        "lineage": {
+          "chain_id": "chain-local-multi-agent-proof-001",
+          "hop_count": 1,
+          "max_hops": 2,
+          "parent_role": "planner",
+          "parent_task_id": "task-local-multi-agent-proof-001"
+        },
+        "source_task_id": "task-local-multi-agent-proof-001",
+        "task_id": "exec-b"
+      },
+      "role": "executor",
+      "status": "succeeded",
+      "task_id": "exec-b"
+    },
+    {
+      "approved": true,
+      "dedupe_key": "review-final",
+      "lineage": {
+        "chain_id": "chain-local-multi-agent-proof-001",
+        "hop_count": 1,
+        "max_hops": 2,
+        "parent_role": "planner",
+        "parent_task_id": "task-local-multi-agent-proof-001"
+      },
+      "notes": "approved bounded planner chain",
+      "output": {
+        "approved": true,
+        "reviewed_children": 2,
+        "reviewer_task_id": "review-final"
+      },
+      "role": "reviewer",
+      "status": "succeeded",
+      "task_id": "review-final"
+    }
+  ],
+  "correlation_id": "corr-local-multi-agent-proof-001",
+  "outcome": "succeeded",
+  "role": "planner",
+  "task_id": "task-local-multi-agent-proof-001",
+  "worker_pool": {
+    "limit": 2,
+    "max_in_flight": 2
+  }
+}

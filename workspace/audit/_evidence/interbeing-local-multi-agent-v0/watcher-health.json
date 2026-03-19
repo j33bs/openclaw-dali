@@ -1,0 +1,95 @@
+{
+  "health": {
+    "status": "warning",
+    "issues": ["journal_warnings:2", "recent_failures:1"]
+  },
+  "journal": {
+    "available": true,
+    "detail": null,
+    "errors": [],
+    "unit": "openclaw-interbeing-watcher.service",
+    "warnings": [
+      {
+        "message": "openclaw-interbeing-watcher.service: Main process exited, code=killed, status=9/KILL",
+        "priority": 4,
+        "timestamp": "2026-03-19T11:27:34.230Z"
+      },
+      {
+        "message": "openclaw-interbeing-watcher.service: Failed with result 'signal'.",
+        "priority": 4,
+        "timestamp": "2026-03-19T11:27:34.230Z"
+      }
+    ]
+  },
+  "service": {
+    "active_enter_timestamp": "Thu 2026-03-19 21:45:44 AEST",
+    "active_state": "active",
+    "available": true,
+    "detail": null,
+    "exec_main_code": "0",
+    "exec_main_status": 0,
+    "fragment_path": "/home/jeebs/.config/systemd/user/openclaw-interbeing-watcher.service",
+    "load_state": "loaded",
+    "main_pid": 1110699,
+    "n_restarts": 0,
+    "result": "success",
+    "sub_state": "running",
+    "unit": "openclaw-interbeing-watcher.service",
+    "unit_file_state": "enabled"
+  },
+  "tool_name": "interbeing-watcher-v0",
+  "watcher": {
+    "tool_name": "interbeing-watcher-v0",
+    "watcher_version": "v0-hardening",
+    "available_modes": ["once", "start", "status", "health", "list", "verify", "replay"],
+    "paths": {
+      "incoming": "handoff/incoming/dali",
+      "processed": "handoff/processed/dali",
+      "failed": "handoff/failed/dali"
+    },
+    "counts": {
+      "incoming": 0,
+      "processed": 5,
+      "failed": 1,
+      "partial": 0
+    },
+    "state": {
+      "exists": true,
+      "path": "workspace/state/interbeing_watcher_v0.json",
+      "tracked_hashes": 4,
+      "pending_reprocess_overrides": 0,
+      "readable": true
+    },
+    "last_processed_timestamp": "2026-03-19T11:45:59.091Z",
+    "last_failed_timestamp": "2026-03-19T11:28:13.617Z",
+    "log_path": "workspace/audit/interbeing_watcher_v0.log",
+    "health": {
+      "status": "ok",
+      "issues": []
+    },
+    "lock": {
+      "acquired_at": null,
+      "age_seconds": null,
+      "detail": null,
+      "exists": false,
+      "owner_command": null,
+      "owner_matches_watcher": null,
+      "path": "workspace/state/interbeing_watcher_v0.lock",
+      "pid": null,
+      "status": "absent",
+      "tool_name": null,
+      "watcher_version": null
+    },
+    "recent_failures": [
+      {
+        "action": "intake",
+        "filename": "2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+        "reason_code": "schema_version_invalid",
+        "reason_detail": "\"v1\"",
+        "status": "failed",
+        "timestamp": "2026-03-19T11:28:13.617Z"
+      }
+    ]
+  },
+  "watcher_version": "v0-hardening"
+}

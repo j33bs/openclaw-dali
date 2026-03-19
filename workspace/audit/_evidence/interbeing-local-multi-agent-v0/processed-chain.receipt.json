@@ -1,0 +1,44 @@
+{
+  "evidence": {
+    "lifecycle_output_dir": "workspace/audit/interbeing-watcher-v0/last-run",
+    "log_path": "workspace/audit/interbeing_watcher_v0.log",
+    "state_path": "workspace/state/interbeing_watcher_v0.json"
+  },
+  "final_disposition": "processed",
+  "intake_path": "handoff/incoming/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+  "intake_timestamp": "2026-03-19T11:45:59.091Z",
+  "local_dispatch": {
+    "children": {
+      "executed": 3,
+      "failed": 0,
+      "skipped_duplicates": 1,
+      "total": 4
+    },
+    "lineage": {
+      "chain_id": "chain-local-multi-agent-proof-001",
+      "hop_count": 0,
+      "max_hops": 2,
+      "parent_role": null,
+      "parent_task_id": null
+    },
+    "reviewer_gate": {
+      "approved": true,
+      "required": true,
+      "reviewer_task_id": "review-final"
+    },
+    "role": "planner",
+    "worker_pool": {
+      "limit": 2,
+      "max_in_flight": 2
+    }
+  },
+  "original_filename": "2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+  "reason_code": "processed",
+  "reason_detail": null,
+  "schema_version": "v0",
+  "sha256": "8f98d5a75758f174def4f0633a4a98f10c089eb2913a86ba9d5ea1fe61649750",
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "final_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+  "receipt_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.receipt.json"
+}

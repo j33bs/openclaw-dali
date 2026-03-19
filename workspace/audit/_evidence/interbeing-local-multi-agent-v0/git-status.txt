@@ -1,0 +1,24 @@
+MM scripts/interbeing/local_dispatch_runtime_v0.ts
+MM test/interbeing-watcher-v0.test.ts
+ D workspace/audit/_evidence/interbeing-watcher-v0/README.md
+ D workspace/audit/_evidence/interbeing-watcher-v0/changed-files.txt
+ M workspace/audit/_evidence/interbeing-watcher-v0/failed-invalid-version.receipt.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/failed-processing.receipt.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/forced-reprocess.receipt.json
+ D workspace/audit/_evidence/interbeing-watcher-v0/git-status.txt
+ M workspace/audit/_evidence/interbeing-watcher-v0/interbeing_watcher_v0.log
+ M workspace/audit/_evidence/interbeing-watcher-v0/interbeing_watcher_v0.state.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/list.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/processed-valid.receipt.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/replayed-processed.receipt.json
+ D workspace/audit/_evidence/interbeing-watcher-v0/rollback-notes.md
+ M workspace/audit/_evidence/interbeing-watcher-v0/skipped-duplicate.receipt.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/status.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/verify-by-filename.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/verify-by-sha256.json
+ M workspace/audit/_evidence/interbeing-watcher-v0/watcher-smoke.md
+?? handoff/
+?? workspace/audit/_evidence/interbeing-local-multi-agent-v0/
+?? workspace/audit/interbeing-watcher-v0/
+?? workspace/audit/interbeing_watcher_v0.log
+?? workspace/state/
