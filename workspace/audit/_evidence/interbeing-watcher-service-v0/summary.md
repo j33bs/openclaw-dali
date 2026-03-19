@@ -1,7 +1,7 @@
 # Interbeing Watcher Service v0
 
 - Branch: `codex/harden/interbeing-watcher-service-v0`
-- Commit: pending
+- Commit: `0cadb91dedd28ed83153c4ec6302f4d908fc4a87`
 - Service model: `systemd --user` service
 - Reason: `scripts/interbeing/run_watcher_v0.ts start` is already a long-running chokidar watcher, so a timer would add latency and drift without improving safety.
 
