@@ -273,6 +273,7 @@ export type InterbeingWatcherV0VerifyMatch = {
   disposition: InterbeingWatcherV0Disposition | "incoming";
   file: string;
   intake_timestamp: string | null;
+  local_dispatch?: InterbeingWatcherV0ReceiptLocalDispatch;
   original_filename: string | null;
   reason_code: InterbeingWatcherV0ReasonCode | null;
   receipt_path: string | null;
@@ -1271,6 +1272,7 @@ export async function verifyWatcherArtifact(
       disposition: receipt.final_disposition,
       file: receipt.final_path,
       intake_timestamp: receipt.intake_timestamp,
+      ...(receipt.local_dispatch == null ? {} : { local_dispatch: receipt.local_dispatch }),
       original_filename: receipt.original_filename,
       reason_code: receipt.reason_code,
       receipt_path: receipt.receipt_path,

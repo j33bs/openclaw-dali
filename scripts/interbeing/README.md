@@ -113,6 +113,17 @@ Stable local reason codes:
 
 `payload.local_dispatch` is the Dali-local extension point for bounded multi-agent work. It does not change the canonical v0 envelope shape because it stays inside the already-opaque `payload` object.
 
+Dali accepts both:
+
+- the native Dali shape with `role` plus optional nested `lineage`
+- the C_Lawd-compatible flat shape with `target_role`, `source_role`, `chain_id`, `parent_task_id`, `hop_count`, and `max_hops`
+
+Compatibility mapping:
+
+- `target_role` resolves to the local dispatch role
+- `source_role` resolves to `local_dispatch.lineage.parent_role` in receipts and evidence
+- flat hop and chain fields are normalized into the same receipt lineage structure as the native Dali shape
+
 Supported roles:
 
 - `planner`
@@ -131,6 +142,7 @@ Receipt notes:
 
 - processed and failed receipts may now include `local_dispatch`
 - `local_dispatch` records the resolved role, lineage, worker-pool ceiling, child execution counts, and reviewer gate outcome when local dispatch ran
+- `verify` returns `local_dispatch` for receipt-backed matches, and `list` surfaces the same receipt field unchanged
 
 ## Operator Workflow
 

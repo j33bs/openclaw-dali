@@ -26,13 +26,19 @@ const MAX_REVIEWER_CHILDREN = 1;
 const MAX_SLEEP_MS = 300;
 const LOCAL_DISPATCH_ALLOWED_KEYS = [
   "approved",
+  "chain_id",
+  "hop_count",
   "input",
   "lineage",
+  "max_hops",
   "notes",
+  "parent_task_id",
   "planner_children",
   "result",
   "role",
   "sleep_ms",
+  "source_role",
+  "target_role",
   "worker_limit",
 ] as const;
 const LOCAL_LINEAGE_ALLOWED_KEYS = [
@@ -208,6 +214,22 @@ function normalizeRole(value: unknown, label: string): InterbeingWatcherV0LocalD
   return value;
 }
 
+function normalizeResolvedRole(
+  record: JsonObject,
+  label: string,
+): InterbeingWatcherV0LocalDispatchRole {
+  const role = record.role == null ? null : normalizeRole(record.role, `${label}.role`);
+  const targetRole =
+    record.target_role == null ? null : normalizeRole(record.target_role, `${label}.target_role`);
+  if (role != null && targetRole != null && role !== targetRole) {
+    throw new Error(`${label}.role conflicts with ${label}.target_role`);
+  }
+  if (role == null && targetRole == null) {
+    throw new Error(`${label}.role or ${label}.target_role is required`);
+  }
+  return role ?? targetRole!;
+}
+
 function normalizeRootLineage(
   envelope: InterbeingTaskEnvelopeV0,
   role: InterbeingWatcherV0LocalDispatchRole,
@@ -260,6 +282,43 @@ function normalizeRootLineage(
     });
   }
   return lineage;
+}
+
+function normalizeFlatRootLineage(
+  envelope: InterbeingTaskEnvelopeV0,
+  role: InterbeingWatcherV0LocalDispatchRole,
+  record: JsonObject,
+): InterbeingWatcherV0ReceiptLineage | null {
+  const hasFlatLineage =
+    record.chain_id != null ||
+    record.hop_count != null ||
+    record.max_hops != null ||
+    record.parent_task_id != null ||
+    record.source_role != null;
+  if (!hasFlatLineage) {
+    return null;
+  }
+
+  return normalizeRootLineage(envelope, role, {
+    chain_id: record.chain_id,
+    hop_count: record.hop_count,
+    max_hops: record.max_hops,
+    parent_role: record.source_role,
+    parent_task_id: record.parent_task_id,
+  });
+}
+
+function lineagesMatch(
+  left: InterbeingWatcherV0ReceiptLineage,
+  right: InterbeingWatcherV0ReceiptLineage,
+): boolean {
+  return (
+    left.chain_id === right.chain_id &&
+    left.hop_count === right.hop_count &&
+    left.max_hops === right.max_hops &&
+    left.parent_role === right.parent_role &&
+    left.parent_task_id === right.parent_task_id
+  );
 }
 
 function normalizeWorkerLimit(value: unknown): number {
@@ -411,8 +470,20 @@ function normalizeLocalDispatchSpec(
     const record = asPlainObject(localDispatchValue, `payload.${LOCAL_DISPATCH_KEY}`);
     assertAllowedKeys(record, LOCAL_DISPATCH_ALLOWED_KEYS, `payload.${LOCAL_DISPATCH_KEY}`);
 
-    const role = normalizeRole(record.role, `payload.${LOCAL_DISPATCH_KEY}.role`);
-    const lineage = normalizeRootLineage(envelope, role, record.lineage);
+    const role = normalizeResolvedRole(record, `payload.${LOCAL_DISPATCH_KEY}`);
+    const explicitLineage =
+      record.lineage == null ? null : normalizeRootLineage(envelope, role, record.lineage);
+    const flatLineage = normalizeFlatRootLineage(envelope, role, record);
+    if (
+      explicitLineage != null &&
+      flatLineage != null &&
+      !lineagesMatch(explicitLineage, flatLineage)
+    ) {
+      throw new Error(
+        `payload.${LOCAL_DISPATCH_KEY}.lineage conflicts with flat local_dispatch lineage fields`,
+      );
+    }
+    const lineage = explicitLineage ?? flatLineage ?? normalizeRootLineage(envelope, role, null);
     const workerLimit = normalizeWorkerLimit(record.worker_limit);
     const plannerChildren = asOptionalArray(
       record.planner_children,

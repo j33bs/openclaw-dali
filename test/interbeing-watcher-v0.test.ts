@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
+  listInterbeingWatcherV0Items,
   replayInterbeingWatcherV0,
   runInterbeingWatcherV0,
   verifyInterbeingWatcherV0,
@@ -520,6 +521,144 @@ describe("interbeing watcher v0 hardening", () => {
     });
   });
 
+  it("accepts C_Lawd local_dispatch fields for executor and reviewer targets and preserves mapped lineage", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await Promise.all([
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          task_id: "task-clawd-executor-001",
+          correlation_id: "corr-clawd-executor-001",
+          payload: createLocalDispatchPayload({
+            target_role: "executor",
+            source_role: "planner",
+            chain_id: "chain-clawd-compat-001",
+            parent_task_id: "task-plan-compat-001",
+            hop_count: 1,
+            max_hops: 3,
+            result: {
+              compatibility: "clawd-flat-local-dispatch",
+              ok: true,
+            },
+          }),
+        }),
+        filename: "clawd-executor-compat.task-envelope.v0.json",
+      }),
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          task_id: "task-clawd-reviewer-001",
+          correlation_id: "corr-clawd-reviewer-001",
+          payload: createLocalDispatchPayload({
+            target_role: "reviewer",
+            source_role: "executor",
+            chain_id: "chain-clawd-compat-002",
+            parent_task_id: "task-exec-compat-002",
+            hop_count: 2,
+            max_hops: 3,
+          }),
+        }),
+        filename: "clawd-reviewer-compat.task-envelope.v0.json",
+      }),
+    ]);
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 2,
+      skipped: 0,
+      failed: 0,
+    });
+
+    const executorReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(
+        path.join(paths.processedDir, "clawd-executor-compat.task-envelope.v0.json"),
+      ),
+    );
+    const reviewerReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(
+        path.join(paths.processedDir, "clawd-reviewer-compat.task-envelope.v0.json"),
+      ),
+    );
+
+    expect(executorReceipt.local_dispatch).toMatchObject({
+      role: "executor",
+      lineage: {
+        chain_id: "chain-clawd-compat-001",
+        hop_count: 1,
+        max_hops: 3,
+        parent_role: "planner",
+        parent_task_id: "task-plan-compat-001",
+      },
+      worker_pool: null,
+    });
+    expect(reviewerReceipt.local_dispatch).toMatchObject({
+      role: "reviewer",
+      lineage: {
+        chain_id: "chain-clawd-compat-002",
+        hop_count: 2,
+        max_hops: 3,
+        parent_role: "executor",
+        parent_task_id: "task-exec-compat-002",
+      },
+      reviewer_gate: {
+        approved: true,
+        required: true,
+        reviewer_task_id: "task-clawd-reviewer-001",
+      },
+    });
+
+    const verify = await verifyInterbeingWatcherV0({
+      cwd,
+      filename: "clawd-executor-compat.task-envelope.v0.json",
+    });
+    expect(verify.matches).toHaveLength(1);
+    expect(verify.matches[0]).toMatchObject({
+      disposition: "processed",
+      local_dispatch: {
+        role: "executor",
+        lineage: {
+          chain_id: "chain-clawd-compat-001",
+          hop_count: 1,
+          max_hops: 3,
+          parent_role: "planner",
+          parent_task_id: "task-plan-compat-001",
+        },
+      },
+    });
+
+    const listed = await listInterbeingWatcherV0Items({
+      cwd,
+      limit: 5,
+    });
+    const listedItems = listed.items as Array<{
+      local_dispatch?: ReceiptWithLocalDispatch["local_dispatch"];
+      original_filename?: string;
+    }>;
+    expect(listedItems).toHaveLength(2);
+    expect(
+      listedItems.some(
+        (item) =>
+          item.original_filename === "clawd-executor-compat.task-envelope.v0.json" &&
+          item.local_dispatch?.role === "executor" &&
+          item.local_dispatch?.lineage?.parent_role === "planner",
+      ),
+    ).toBe(true);
+    expect(
+      listedItems.some(
+        (item) =>
+          item.original_filename === "clawd-reviewer-compat.task-envelope.v0.json" &&
+          item.local_dispatch?.role === "reviewer" &&
+          item.local_dispatch?.lineage?.parent_role === "executor",
+      ),
+    ).toBe(true);
+  });
+
   it("runs planner child executors with bounded concurrency and records reviewer-approved lineage", async () => {
     const cwd = await createTempRepoRoot();
     const paths = resolveInterbeingWatcherV0Paths(cwd);
@@ -788,6 +927,58 @@ describe("interbeing watcher v0 hardening", () => {
         limit: 3,
         max_in_flight: 0,
       },
+    });
+  });
+
+  it("fails closed when C_Lawd local_dispatch hop_count exceeds max_hops", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-clawd-hop-limit-001",
+        correlation_id: "corr-clawd-hop-limit-001",
+        payload: createLocalDispatchPayload({
+          target_role: "executor",
+          source_role: "planner",
+          chain_id: "chain-clawd-hop-limit-001",
+          parent_task_id: "task-plan-hop-limit-001",
+          hop_count: 2,
+          max_hops: 1,
+        }),
+      }),
+      filename: "clawd-hop-limit.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+    });
+
+    const failedReceipt = await readJsonFile<ReceiptWithLocalDispatch>(
+      buildReceiptPath(path.join(paths.failedDir, "clawd-hop-limit.task-envelope.v0.json")),
+    );
+    expect(failedReceipt).toMatchObject({
+      final_disposition: "failed",
+      reason_code: "hop_limit_exceeded",
+    });
+    expect(failedReceipt.local_dispatch).toMatchObject({
+      role: "executor",
+      lineage: {
+        chain_id: "chain-clawd-hop-limit-001",
+        hop_count: 2,
+        max_hops: 1,
+        parent_role: "planner",
+        parent_task_id: "task-plan-hop-limit-001",
+      },
+      worker_pool: null,
     });
   });
 
