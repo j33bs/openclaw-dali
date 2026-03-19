@@ -1,0 +1,156 @@
+{
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "items": [
+    {
+      "evidence": {
+        "lifecycle_output_dir": "workspace/audit/interbeing-watcher-v0/last-run",
+        "log_path": "workspace/audit/interbeing_watcher_v0.log",
+        "state_path": "workspace/state/interbeing_watcher_v0.json"
+      },
+      "final_disposition": "processed",
+      "intake_path": "handoff/incoming/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T12:43:22.478Z",
+      "local_dispatch": {
+        "children": null,
+        "lineage": {
+          "chain_id": "chain-clawd-live-compat-001",
+          "hop_count": 2,
+          "max_hops": 3,
+          "parent_role": "executor",
+          "parent_task_id": "task-exec-live-compat-001"
+        },
+        "reviewer_gate": {
+          "approved": true,
+          "required": true,
+          "reviewer_task_id": "task-clawd-live-reviewer-001"
+        },
+        "role": "reviewer",
+        "worker_pool": null
+      },
+      "original_filename": "2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+      "reason_code": "processed",
+      "reason_detail": null,
+      "schema_version": "v0",
+      "sha256": "ac7160a3547be4767b82385bb89209d6d87abf69ca1cd86568aab0d7d465140e",
+      "tool_name": "interbeing-watcher-v0",
+      "watcher_version": "v0-hardening",
+      "final_path": "handoff/processed/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+      "receipt_path": "handoff/processed/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.receipt.json"
+    },
+    {
+      "evidence": {
+        "lifecycle_output_dir": "workspace/audit/interbeing-watcher-v0/last-run",
+        "log_path": "workspace/audit/interbeing_watcher_v0.log",
+        "state_path": "workspace/state/interbeing_watcher_v0.json"
+      },
+      "final_disposition": "processed",
+      "intake_path": "handoff/incoming/dali/2026-03-19T12-44-30Z--clawd-local-dispatch-compat-restart.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T12:43:16.771Z",
+      "local_dispatch": {
+        "children": null,
+        "lineage": {
+          "chain_id": "chain-clawd-live-compat-002",
+          "hop_count": 1,
+          "max_hops": 3,
+          "parent_role": "planner",
+          "parent_task_id": "task-clawd-live-parent-002"
+        },
+        "reviewer_gate": null,
+        "role": "executor",
+        "worker_pool": null
+      },
+      "original_filename": "2026-03-19T12-44-30Z--clawd-local-dispatch-compat-restart.task-envelope.v0.json",
+      "reason_code": "processed",
+      "reason_detail": null,
+      "schema_version": "v0",
+      "sha256": "689d5035b4717e3c7329279e1be81f332cc0968d1c7e81951e9b7e117f67c915",
+      "tool_name": "interbeing-watcher-v0",
+      "watcher_version": "v0-hardening",
+      "final_path": "handoff/processed/dali/2026-03-19T12-44-30Z--clawd-local-dispatch-compat-restart.task-envelope.v0.json",
+      "receipt_path": "handoff/processed/dali/2026-03-19T12-44-30Z--clawd-local-dispatch-compat-restart.task-envelope.v0.receipt.json"
+    },
+    {
+      "evidence": {
+        "lifecycle_output_dir": null,
+        "log_path": "workspace/audit/interbeing_watcher_v0.log",
+        "state_path": "workspace/state/interbeing_watcher_v0.json"
+      },
+      "final_disposition": "failed",
+      "intake_path": "handoff/incoming/dali/2026-03-19T12-42-07Z--clawd-local-dispatch-compat.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T12:42:08.146Z",
+      "original_filename": "2026-03-19T12-42-07Z--clawd-local-dispatch-compat.task-envelope.v0.json",
+      "reason_code": "dispatch_invalid",
+      "reason_detail": "payload.local_dispatch has unexpected property \"target_role\"",
+      "schema_version": "v0",
+      "sha256": "9438a2234fd62e987dc95e21972cf168389c55186b3c1eb5dfadd6c2414382f8",
+      "tool_name": "interbeing-watcher-v0",
+      "watcher_version": "v0-hardening",
+      "final_path": "handoff/failed/dali/2026-03-19T12-42-07Z--clawd-local-dispatch-compat.task-envelope.v0.json",
+      "receipt_path": "handoff/failed/dali/2026-03-19T12-42-07Z--clawd-local-dispatch-compat.task-envelope.v0.receipt.json"
+    },
+    {
+      "evidence": {
+        "lifecycle_output_dir": "workspace/audit/interbeing-watcher-v0/last-run",
+        "log_path": "workspace/audit/interbeing_watcher_v0.log",
+        "state_path": "workspace/state/interbeing_watcher_v0.json"
+      },
+      "final_disposition": "processed",
+      "intake_path": "handoff/incoming/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T11:45:59.091Z",
+      "local_dispatch": {
+        "children": {
+          "executed": 3,
+          "failed": 0,
+          "skipped_duplicates": 1,
+          "total": 4
+        },
+        "lineage": {
+          "chain_id": "chain-local-multi-agent-proof-001",
+          "hop_count": 0,
+          "max_hops": 2,
+          "parent_role": null,
+          "parent_task_id": null
+        },
+        "reviewer_gate": {
+          "approved": true,
+          "required": true,
+          "reviewer_task_id": "review-final"
+        },
+        "role": "planner",
+        "worker_pool": {
+          "limit": 2,
+          "max_in_flight": 2
+        }
+      },
+      "original_filename": "2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+      "reason_code": "processed",
+      "reason_detail": null,
+      "schema_version": "v0",
+      "sha256": "8f98d5a75758f174def4f0633a4a98f10c089eb2913a86ba9d5ea1fe61649750",
+      "tool_name": "interbeing-watcher-v0",
+      "watcher_version": "v0-hardening",
+      "final_path": "handoff/processed/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.json",
+      "receipt_path": "handoff/processed/dali/2026-03-19T11-46-10Z--local-multi-agent-proof.task-envelope.v0.receipt.json"
+    },
+    {
+      "evidence": {
+        "lifecycle_output_dir": null,
+        "log_path": "workspace/audit/interbeing_watcher_v0.log",
+        "state_path": "workspace/state/interbeing_watcher_v0.json"
+      },
+      "final_disposition": "failed",
+      "intake_path": "handoff/incoming/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+      "intake_timestamp": "2026-03-19T11:28:13.617Z",
+      "original_filename": "2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+      "reason_code": "schema_version_invalid",
+      "reason_detail": "\"v1\"",
+      "schema_version": "v0",
+      "sha256": null,
+      "tool_name": "interbeing-watcher-v0",
+      "watcher_version": "v0-hardening",
+      "final_path": "handoff/failed/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.json",
+      "receipt_path": "handoff/failed/dali/2026-03-19T11-28-20Z--ops-invalid-schema-version.task-envelope.v0.receipt.json"
+    }
+  ]
+}

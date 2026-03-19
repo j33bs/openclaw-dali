@@ -1,0 +1,8 @@
+MainPID=1128354
+Result=success
+NRestarts=0
+ActiveState=active
+SubState=running
+FragmentPath=/home/jeebs/.config/systemd/user/openclaw-interbeing-watcher.service
+UnitFileState=enabled
+ActiveEnterTimestamp=Thu 2026-03-19 22:43:05 AEST

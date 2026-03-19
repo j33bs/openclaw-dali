@@ -1,0 +1,36 @@
+{
+  "evidence": {
+    "lifecycle_output_dir": "workspace/audit/interbeing-watcher-v0/last-run",
+    "log_path": "workspace/audit/interbeing_watcher_v0.log",
+    "state_path": "workspace/state/interbeing_watcher_v0.json"
+  },
+  "final_disposition": "processed",
+  "intake_path": "handoff/incoming/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+  "intake_timestamp": "2026-03-19T12:43:22.478Z",
+  "local_dispatch": {
+    "children": null,
+    "lineage": {
+      "chain_id": "chain-clawd-live-compat-001",
+      "hop_count": 2,
+      "max_hops": 3,
+      "parent_role": "executor",
+      "parent_task_id": "task-exec-live-compat-001"
+    },
+    "reviewer_gate": {
+      "approved": true,
+      "required": true,
+      "reviewer_task_id": "task-clawd-live-reviewer-001"
+    },
+    "role": "reviewer",
+    "worker_pool": null
+  },
+  "original_filename": "2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+  "reason_code": "processed",
+  "reason_detail": null,
+  "schema_version": "v0",
+  "sha256": "ac7160a3547be4767b82385bb89209d6d87abf69ca1cd86568aab0d7d465140e",
+  "tool_name": "interbeing-watcher-v0",
+  "watcher_version": "v0-hardening",
+  "final_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json",
+  "receipt_path": "/home/jeebs/src/openclaw-dali/handoff/processed/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.receipt.json"
+}

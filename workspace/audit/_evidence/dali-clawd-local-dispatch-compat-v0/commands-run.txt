@@ -1,0 +1,13 @@
+git status --short --branch
+rg -n 'local_dispatch|target_role|source_role|chain_id|parent_task_id|hop_count|max_hops|planner|executor|reviewer' /home/jeebs/src/openclaw-interbeing /home/jeebs/src/openclaw-dali -g '!**/dist/**'
+pnpm build
+pnpm test -- test/interbeing-watcher-v0.test.ts
+git diff --check
+systemctl --user restart openclaw-interbeing-watcher.service
+systemctl --user show openclaw-interbeing-watcher.service -p ActiveState -p SubState -p Result -p MainPID -p NRestarts -p ActiveEnterTimestamp -p FragmentPath -p UnitFileState
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts status
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts health
+wrote handoff/incoming/dali/2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts verify --filename 2026-03-19T12-43-10Z--clawd-reviewer-compat-live.task-envelope.v0.json
+pnpm exec tsx scripts/interbeing/run_watcher_v0.ts list --limit 5
+journalctl --user -u openclaw-interbeing-watcher.service -n 20 --no-pager

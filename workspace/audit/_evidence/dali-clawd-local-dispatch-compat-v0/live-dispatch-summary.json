@@ -1,0 +1,11 @@
+{
+  "correlation_id": "corr-clawd-live-reviewer-001",
+  "outcome": "succeeded",
+  "output": {
+    "approved": true,
+    "reviewed_children": 0,
+    "reviewer_task_id": "task-clawd-live-reviewer-001"
+  },
+  "role": "reviewer",
+  "task_id": "task-clawd-live-reviewer-001"
+}
