@@ -25,6 +25,7 @@ export const WATCHER_LOG_FILENAME = "interbeing_watcher_v0.log";
 export const WATCHER_LOCK_FILENAME = "interbeing_watcher_v0.lock";
 export const WATCHER_SYSTEMD_SERVICE_NAME = "openclaw-interbeing-watcher";
 export const WATCHER_LOCK_STALE_AGE_MS = 60_000;
+export const WATCHER_HEALTH_ISSUE_MAX_AGE_MS = 12 * 60 * 60 * 1_000;
 export const WATCHER_AVAILABLE_MODES = [
   "once",
   "start",
@@ -318,6 +319,7 @@ export type InterbeingWatcherV0HealthDeps = {
     unit: string,
     paths: InterbeingWatcherV0Paths,
   ) => Promise<InterbeingWatcherV0ServiceRuntimeSummary>;
+  now?: () => number;
   readRecentFailures?: (
     paths: InterbeingWatcherV0Paths,
   ) => Promise<InterbeingWatcherV0RecentLogIssueSummary[]>;
@@ -329,6 +331,21 @@ export type InterbeingWatcherV0HealthDeps = {
 
 export function nowIso(): string {
   return new Date().toISOString();
+}
+
+function isRecentIsoTimestamp(
+  timestamp: string | null | undefined,
+  nowMs: number,
+  maxAgeMs: number,
+): boolean {
+  if (typeof timestamp !== "string" || timestamp.trim().length === 0) {
+    return false;
+  }
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return false;
+  }
+  return nowMs - parsed <= maxAgeMs;
 }
 
 export function normalizeErrorMessage(err: unknown): string {
@@ -1178,6 +1195,19 @@ export async function summarizeWatcherHealth(
     (deps.readJournalIssues ?? readWatcherJournalIssues)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
     (deps.readRecentFailures ?? readRecentWatcherFailures)(paths),
   ]);
+  const nowMs = (deps.now ?? Date.now)();
+  const recentJournal = {
+    ...journal,
+    errors: journal.errors.filter((entry) =>
+      isRecentIsoTimestamp(entry.timestamp, nowMs, WATCHER_HEALTH_ISSUE_MAX_AGE_MS),
+    ),
+    warnings: journal.warnings.filter((entry) =>
+      isRecentIsoTimestamp(entry.timestamp, nowMs, WATCHER_HEALTH_ISSUE_MAX_AGE_MS),
+    ),
+  };
+  const freshRecentFailures = recentFailures.filter((entry) =>
+    isRecentIsoTimestamp(entry.timestamp, nowMs, WATCHER_HEALTH_ISSUE_MAX_AGE_MS),
+  );
 
   const issues = [...watcher.health.issues];
 
@@ -1205,18 +1235,18 @@ export async function summarizeWatcherHealth(
   } else if (lock.status === "unknown") {
     issues.push(`lock_unknown:${lock.detail ?? lock.path}`);
   }
-  if (!journal.available) {
-    issues.push(`journal_unavailable:${journal.detail ?? "unavailable"}`);
+  if (!recentJournal.available) {
+    issues.push(`journal_unavailable:${recentJournal.detail ?? "unavailable"}`);
   } else {
-    if (journal.errors.length > 0) {
-      issues.push(`journal_errors:${journal.errors.length}`);
+    if (recentJournal.errors.length > 0) {
+      issues.push(`journal_errors:${recentJournal.errors.length}`);
     }
-    if (journal.warnings.length > 0) {
-      issues.push(`journal_warnings:${journal.warnings.length}`);
+    if (recentJournal.warnings.length > 0) {
+      issues.push(`journal_warnings:${recentJournal.warnings.length}`);
     }
   }
-  if (recentFailures.length > 0) {
-    issues.push(`recent_failures:${recentFailures.length}`);
+  if (freshRecentFailures.length > 0) {
+    issues.push(`recent_failures:${freshRecentFailures.length}`);
   }
 
   const healthStatus =
@@ -1233,13 +1263,13 @@ export async function summarizeWatcherHealth(
       status: healthStatus,
       issues,
     },
-    journal,
+    journal: recentJournal,
     service,
     tool_name: WATCHER_TOOL_NAME,
     watcher: {
       ...watcher,
       lock,
-      recent_failures: recentFailures,
+      recent_failures: freshRecentFailures,
     },
     watcher_version: WATCHER_TOOL_VERSION,
   };

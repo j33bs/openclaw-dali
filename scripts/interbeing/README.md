@@ -94,6 +94,7 @@ Notes:
 - The lock file is crash-recoverable. A dead owner PID is cleared automatically, and a live PID is only treated as stale when it is clearly not a watcher process. Anything ambiguous remains fail-closed and operator-visible through `health`.
 - `status`, `list`, and `verify` stay read-only and can be run while the service is active.
 - `health` is the fastest operator diagnostic. It reports the installed unit path, service state, restart count, watched paths, queue depth, lock state, state-file readability, last processed or failed timestamps, and recent journal or watcher-log failures.
+- `health` only surfaces journal warnings and watcher-log failures with timestamps from the last 12 hours, so stale historical noise does not keep the service in a warning state after recovery.
 
 ## Failure Taxonomy
 

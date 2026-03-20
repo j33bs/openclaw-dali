@@ -404,6 +404,7 @@ describe("interbeing watcher v0 hardening", () => {
     const health = await getInterbeingWatcherV0Health({
       cwd,
       deps: {
+        now: () => Date.parse("2026-03-19T11:10:00.000Z"),
         inspectLock: async () => ({
           acquired_at: null,
           age_seconds: null,
@@ -471,6 +472,86 @@ describe("interbeing watcher v0 hardening", () => {
     expect(health.health.issues).toContain("service_restarts:1");
     expect(health.health.issues).toContain("journal_warnings:1");
     expect(health.health.issues).toContain("recent_failures:1");
+  });
+
+  it("ignores stale journal warnings and failure receipts in health summaries", async () => {
+    const cwd = await createTempRepoRoot();
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({ task_id: "task-health-stale-001" }),
+      filename: "health-stale.task-envelope.v0.json",
+    });
+
+    await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async ({ outputDir }) => createSuccessfulLifecycleRunner(outputDir),
+    });
+
+    const health = await getInterbeingWatcherV0Health({
+      cwd,
+      deps: {
+        now: () => Date.parse("2026-03-20T20:00:00.000Z"),
+        inspectLock: async () => ({
+          acquired_at: null,
+          age_seconds: null,
+          detail: null,
+          exists: false,
+          owner_command: null,
+          owner_matches_watcher: null,
+          path: "workspace/state/interbeing_watcher_v0.lock",
+          pid: null,
+          status: "absent",
+          tool_name: null,
+          watcher_version: null,
+        }),
+        inspectService: async () => ({
+          active_enter_timestamp: "Thu 2026-03-20 19:50:00 UTC",
+          active_state: "active",
+          available: true,
+          detail: null,
+          exec_main_code: "0",
+          exec_main_status: 0,
+          fragment_path: "scripts/systemd/openclaw-interbeing-watcher.service",
+          load_state: "loaded",
+          main_pid: 1234,
+          n_restarts: 0,
+          result: "success",
+          sub_state: "running",
+          unit: "openclaw-interbeing-watcher.service",
+          unit_file_state: "enabled",
+        }),
+        readJournalIssues: async () => ({
+          available: true,
+          detail: null,
+          errors: [],
+          unit: "openclaw-interbeing-watcher.service",
+          warnings: [
+            {
+              message: "older restart warning",
+              priority: 4,
+              timestamp: "2026-03-19T11:01:00.000Z",
+            },
+          ],
+        }),
+        readRecentFailures: async () => [
+          {
+            action: "intake",
+            filename: "invalid-schema-version.task-envelope.v0.json",
+            reason_code: "schema_version_invalid",
+            reason_detail: '"v1"',
+            status: "failed",
+            timestamp: "2026-03-19T11:02:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(health.journal.warnings).toHaveLength(0);
+    expect(health.watcher.recent_failures).toHaveLength(0);
+    expect(health.health.status).toBe("ok");
+    expect(health.health.issues).not.toContain("journal_warnings:1");
+    expect(health.health.issues).not.toContain("recent_failures:1");
   });
 
   it("clears stale lock files left behind by dead processes", async () => {
