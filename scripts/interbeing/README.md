@@ -4,6 +4,8 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 
 ## Commands
 
+### Watcher
+
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts start`
   Runs the single-threaded watcher against `handoff/incoming/dali/` using the repo-local vendored schemas in `schemas/`.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts once`
@@ -26,7 +28,23 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - `scripts/interbeing/run_watcher_v0_service.sh start`
   Runs the long-lived watcher with an explicit repo-root working directory for systemd user service use.
 
+### Emitter
+
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts emit --requestor dali --target-node c_lawd --task-id task-001 --correlation-id corr-001 --payload-json '{"intent":"notify","message":"hello"}'`
+  Emits a canonical `submit_task` envelope into `handoff/outgoing/<target>/` with an adjacent receipt and emitter state/log updates.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts emit ... --deliver-dir /path/to/bridge/incoming/c_lawd`
+  Also copies the emitted envelope into an external bridge/inbox directory when you have a proven handoff path.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts list --limit 10`
+  Lists recent outbound emissions.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts status`
+  Prints a machine-readable summary of the emitter roots and recent emitted counts by target node.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts verify --filename <name>`
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts verify --sha256 <hash>`
+  Verifies that a previously emitted envelope still exists in the outbound queue and returns its receipt path.
+
 ## Local Paths
+
+### Watcher
 
 - intake: `handoff/incoming/dali/`
 - processed: `handoff/processed/dali/`
@@ -35,6 +53,14 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - mutation lock: `workspace/state/interbeing_watcher_v0.lock`
 - log: `workspace/audit/interbeing_watcher_v0.log`
 - lifecycle output: `workspace/audit/interbeing-watcher-v0/last-run/`
+
+### Emitter
+
+- outgoing root: `handoff/outgoing/`
+- per-target queue: `handoff/outgoing/<target_node>/`
+- state: `workspace/state/interbeing_emitter_v0.json`
+- log: `workspace/audit/interbeing_emitter_v0.log`
+- receipt: adjacent `*.receipt.json`
 
 Successful runs now persist a small success artifact in the lifecycle output
 directory and point the terminal `task-status-succeeded.json` `result_ref.uri`
