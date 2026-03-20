@@ -54,6 +54,13 @@ type ReceiptWithLocalDispatch = {
       reviewer_task_id: string | null;
     } | null;
     role: string;
+    task_contract?: {
+      acceptance_criteria?: string[];
+      execution_notes?: string;
+      review_mode?: string;
+      task_class?: string;
+      worker_limit?: number;
+    } | null;
     worker_pool: {
       limit: number;
       max_in_flight: number;
@@ -554,6 +561,106 @@ describe("interbeing watcher v0 hardening", () => {
     expect(health.health.issues).not.toContain("recent_failures:1");
   });
 
+  it("ignores replayed recent failures once a later processed receipt exists", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    const processedFile = path.join(paths.processedDir, "replayed.task-envelope.v0.json");
+    const receiptPath = buildReceiptPath(processedFile);
+
+    await mkdir(paths.processedDir, { recursive: true });
+    await mkdir(path.dirname(paths.logPath), { recursive: true });
+    await writeFile(
+      processedFile,
+      `${JSON.stringify(createEnvelope({ task_id: "task-health-replayed-001" }), null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(paths.logPath, "", "utf8");
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify(
+        {
+          evidence: {
+            lifecycle_output_dir: "workspace/audit/interbeing-watcher-v0/last-run",
+            log_path: "workspace/audit/interbeing_watcher_v0.log",
+            state_path: "workspace/state/interbeing_watcher_v0.json",
+          },
+          final_disposition: "processed",
+          final_path: processedFile,
+          intake_path: "handoff/incoming/dali/replayed.task-envelope.v0.json",
+          intake_timestamp: "2026-03-20T20:05:00.000Z",
+          original_filename: "replayed.task-envelope.v0.json",
+          reason_code: "processed",
+          reason_detail: null,
+          receipt_path: receiptPath,
+          schema_version: "v0",
+          sha256: "sha-health-replayed-001",
+          tool_name: "interbeing-watcher-v0",
+          watcher_version: "v0-hardening",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const health = await getInterbeingWatcherV0Health({
+      cwd,
+      deps: {
+        now: () => Date.parse("2026-03-20T20:10:00.000Z"),
+        inspectLock: async () => ({
+          acquired_at: null,
+          age_seconds: null,
+          detail: null,
+          exists: false,
+          owner_command: null,
+          owner_matches_watcher: null,
+          path: "workspace/state/interbeing_watcher_v0.lock",
+          pid: null,
+          status: "absent",
+          tool_name: null,
+          watcher_version: null,
+        }),
+        inspectService: async () => ({
+          active_enter_timestamp: "Thu 2026-03-20 20:00:00 UTC",
+          active_state: "active",
+          available: true,
+          detail: null,
+          exec_main_code: "0",
+          exec_main_status: 0,
+          fragment_path: "scripts/systemd/openclaw-interbeing-watcher.service",
+          load_state: "loaded",
+          main_pid: 1234,
+          n_restarts: 0,
+          result: "success",
+          sub_state: "running",
+          unit: "openclaw-interbeing-watcher.service",
+          unit_file_state: "enabled",
+        }),
+        readJournalIssues: async () => ({
+          available: true,
+          detail: null,
+          errors: [],
+          unit: "openclaw-interbeing-watcher.service",
+          warnings: [],
+        }),
+        readRecentFailures: async () => [
+          {
+            action: "intake",
+            filename: "replayed.task-envelope.v0.json",
+            reason_code: "dispatch_invalid",
+            reason_detail: 'payload.local_dispatch has unexpected property "task_contract"',
+            status: "failed",
+            timestamp: "2026-03-20T20:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(health.watcher.recent_failures).toHaveLength(0);
+    expect(health.health.status).toBe("ok");
+    expect(health.health.issues).not.toContain("recent_failures:1");
+  });
+
   it("clears stale lock files left behind by dead processes", async () => {
     const cwd = await createTempRepoRoot();
     const paths = resolveInterbeingWatcherV0Paths(cwd);
@@ -659,6 +766,13 @@ describe("interbeing watcher v0 hardening", () => {
             parent_task_id: "task-plan-compat-001",
             hop_count: 1,
             max_hops: 3,
+            task_contract: {
+              task_class: "executor_work",
+              acceptance_criteria: ["produce summary", "cite evidence"],
+              review_mode: "peer_review",
+              worker_limit: 2,
+              execution_notes: "Prefer concise operator-visible output.",
+            },
             result: {
               compatibility: "clawd-flat-local-dispatch",
               ok: true,
@@ -717,6 +831,13 @@ describe("interbeing watcher v0 hardening", () => {
         parent_role: "planner",
         parent_task_id: "task-plan-compat-001",
       },
+      task_contract: {
+        task_class: "executor_work",
+        acceptance_criteria: ["produce summary", "cite evidence"],
+        review_mode: "peer_review",
+        worker_limit: 2,
+        execution_notes: "Prefer concise operator-visible output.",
+      },
       worker_pool: null,
     });
     expect(reviewerReceipt.local_dispatch).toMatchObject({
@@ -751,6 +872,10 @@ describe("interbeing watcher v0 hardening", () => {
           parent_role: "planner",
           parent_task_id: "task-plan-compat-001",
         },
+        task_contract: {
+          task_class: "executor_work",
+          worker_limit: 2,
+        },
       },
     });
 
@@ -768,7 +893,8 @@ describe("interbeing watcher v0 hardening", () => {
         (item) =>
           item.original_filename === "clawd-executor-compat.task-envelope.v0.json" &&
           item.local_dispatch?.role === "executor" &&
-          item.local_dispatch?.lineage?.parent_role === "planner",
+          item.local_dispatch?.lineage?.parent_role === "planner" &&
+          item.local_dispatch?.task_contract?.task_class === "executor_work",
       ),
     ).toBe(true);
     expect(
@@ -779,6 +905,59 @@ describe("interbeing watcher v0 hardening", () => {
           item.local_dispatch?.lineage?.parent_role === "executor",
       ),
     ).toBe(true);
+  });
+
+  it("fails closed when task_contract includes unknown adapter-local fields", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-clawd-task-contract-invalid-001",
+        correlation_id: "corr-clawd-task-contract-invalid-001",
+        payload: createLocalDispatchPayload({
+          target_role: "executor",
+          source_role: "planner",
+          chain_id: "chain-clawd-task-contract-invalid-001",
+          parent_task_id: "task-plan-task-contract-invalid-001",
+          hop_count: 1,
+          max_hops: 3,
+          task_contract: {
+            task_class: "planner_child",
+            unexpected_field: true,
+          },
+        }),
+      }),
+      filename: "clawd-task-contract-invalid.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+    });
+
+    const failedReceipt = await readJsonFile<{
+      final_disposition: string;
+      reason_code: string;
+      reason_detail: string | null;
+    }>(
+      buildReceiptPath(
+        path.join(paths.failedDir, "clawd-task-contract-invalid.task-envelope.v0.json"),
+      ),
+    );
+    expect(failedReceipt).toMatchObject({
+      final_disposition: "failed",
+      reason_code: "dispatch_invalid",
+      reason_detail:
+        'payload.local_dispatch.task_contract has unexpected property "unexpected_field"',
+    });
   });
 
   it("runs planner child executors with bounded concurrency and records reviewer-approved lineage", async () => {
@@ -1067,6 +1246,10 @@ describe("interbeing watcher v0 hardening", () => {
           parent_task_id: "task-plan-hop-limit-001",
           hop_count: 2,
           max_hops: 1,
+          task_contract: {
+            task_class: "planner_child",
+            worker_limit: 1,
+          },
         }),
       }),
       filename: "clawd-hop-limit.task-envelope.v0.json",
@@ -1099,6 +1282,10 @@ describe("interbeing watcher v0 hardening", () => {
         max_hops: 1,
         parent_role: "planner",
         parent_task_id: "task-plan-hop-limit-001",
+      },
+      task_contract: {
+        task_class: "planner_child",
+        worker_limit: 1,
       },
       worker_pool: null,
     });

@@ -69,6 +69,16 @@ export type InterbeingWatcherV0ReceiptLineage = {
   parent_task_id: string | null;
 };
 
+// Adapter-local passthrough metadata carried in local_dispatch receipts.
+// This does not alter canonical Interbeing v0 payload or transport semantics.
+export type InterbeingWatcherV0ReceiptTaskContract = {
+  acceptance_criteria?: string[];
+  execution_notes?: string;
+  review_mode?: string;
+  task_class?: string;
+  worker_limit?: number;
+};
+
 export type InterbeingWatcherV0ReceiptLocalDispatch = {
   children: {
     executed: number;
@@ -83,6 +93,7 @@ export type InterbeingWatcherV0ReceiptLocalDispatch = {
     reviewer_task_id: string | null;
   } | null;
   role: InterbeingWatcherV0LocalDispatchRole;
+  task_contract?: InterbeingWatcherV0ReceiptTaskContract | null;
   worker_pool: {
     limit: number;
     max_in_flight: number;
@@ -269,6 +280,22 @@ export type InterbeingWatcherV0HealthSummary = {
   };
   watcher_version: string;
 };
+
+function latestProcessedReceiptTimestampsByFilename(
+  receipts: InterbeingWatcherV0Receipt[],
+): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const receipt of receipts) {
+    if (receipt.final_disposition !== "processed") {
+      continue;
+    }
+    const existing = latest.get(receipt.original_filename);
+    if (existing == null || existing < receipt.intake_timestamp) {
+      latest.set(receipt.original_filename, receipt.intake_timestamp);
+    }
+  }
+  return latest;
+}
 
 export type InterbeingWatcherV0VerifyMatch = {
   disposition: InterbeingWatcherV0Disposition | "incoming";
@@ -1188,12 +1215,13 @@ export async function summarizeWatcherHealth(
   paths: InterbeingWatcherV0Paths,
   deps: InterbeingWatcherV0HealthDeps = {},
 ): Promise<InterbeingWatcherV0HealthSummary> {
-  const [watcher, lock, service, journal, recentFailures] = await Promise.all([
+  const [watcher, lock, service, journal, recentFailures, receipts] = await Promise.all([
     summarizeWatcherStatus(paths),
     (deps.inspectLock ?? inspectWatcherLock)(paths),
     (deps.inspectService ?? inspectWatcherServiceRuntime)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
     (deps.readJournalIssues ?? readWatcherJournalIssues)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
     (deps.readRecentFailures ?? readRecentWatcherFailures)(paths),
+    listWatcherReceipts(paths),
   ]);
   const nowMs = (deps.now ?? Date.now)();
   const recentJournal = {
@@ -1205,9 +1233,14 @@ export async function summarizeWatcherHealth(
       isRecentIsoTimestamp(entry.timestamp, nowMs, WATCHER_HEALTH_ISSUE_MAX_AGE_MS),
     ),
   };
+  const latestProcessedByFilename = latestProcessedReceiptTimestampsByFilename(receipts);
   const freshRecentFailures = recentFailures.filter((entry) =>
     isRecentIsoTimestamp(entry.timestamp, nowMs, WATCHER_HEALTH_ISSUE_MAX_AGE_MS),
   );
+  const activeRecentFailures = freshRecentFailures.filter((entry) => {
+    const processedTimestamp = latestProcessedByFilename.get(entry.filename);
+    return processedTimestamp == null || processedTimestamp < entry.timestamp;
+  });
 
   const issues = [...watcher.health.issues];
 
@@ -1245,8 +1278,8 @@ export async function summarizeWatcherHealth(
       issues.push(`journal_warnings:${recentJournal.warnings.length}`);
     }
   }
-  if (freshRecentFailures.length > 0) {
-    issues.push(`recent_failures:${freshRecentFailures.length}`);
+  if (activeRecentFailures.length > 0) {
+    issues.push(`recent_failures:${activeRecentFailures.length}`);
   }
 
   const healthStatus =
@@ -1269,7 +1302,7 @@ export async function summarizeWatcherHealth(
     watcher: {
       ...watcher,
       lock,
-      recent_failures: freshRecentFailures,
+      recent_failures: activeRecentFailures,
     },
     watcher_version: WATCHER_TOOL_VERSION,
   };

@@ -95,6 +95,7 @@ Notes:
 - `status`, `list`, and `verify` stay read-only and can be run while the service is active.
 - `health` is the fastest operator diagnostic. It reports the installed unit path, service state, restart count, watched paths, queue depth, lock state, state-file readability, last processed or failed timestamps, and recent journal or watcher-log failures.
 - `health` only surfaces journal warnings and watcher-log failures with timestamps from the last 12 hours, so stale historical noise does not keep the service in a warning state after recovery.
+- `health` also suppresses replayed failures once the same filename has a later processed receipt, so successful recovery clears the active-failure count without waiting for the 12-hour window to expire.
 
 ## Failure Taxonomy
 
@@ -132,6 +133,21 @@ Compatibility mapping:
 - `target_role` resolves to the local dispatch role
 - `source_role` resolves to `local_dispatch.lineage.parent_role` in receipts and evidence
 - flat hop and chain fields are normalized into the same receipt lineage structure as the native Dali shape
+- optional `task_contract` metadata is accepted as adapter-local input and preserved in `local_dispatch` receipts when present
+
+Accepted `task_contract` fields:
+
+- `task_class`
+- `acceptance_criteria`
+- `review_mode`
+- `worker_limit`
+- `execution_notes`
+
+Notes:
+
+- `task_contract` must be an object; unknown nested keys fail closed as `dispatch_invalid`
+- `task_contract` is informational adapter-local metadata for cross-repo compatibility and does not change canonical v0 semantics
+- `task_contract.worker_limit` does not override Dali runtime fan-out; bounded execution still uses the top-level local `worker_limit`
 
 Supported roles:
 
@@ -150,7 +166,7 @@ Planner limits:
 Receipt notes:
 
 - processed and failed receipts may now include `local_dispatch`
-- `local_dispatch` records the resolved role, lineage, worker-pool ceiling, child execution counts, and reviewer gate outcome when local dispatch ran
+- `local_dispatch` records the resolved role, lineage, worker-pool ceiling, child execution counts, reviewer gate outcome, and any accepted adapter-local `task_contract` metadata when local dispatch ran
 - `verify` returns `local_dispatch` for receipt-backed matches, and `list` surfaces the same receipt field unchanged
 
 ## Operator Workflow

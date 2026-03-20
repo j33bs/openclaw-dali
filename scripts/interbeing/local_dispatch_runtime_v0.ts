@@ -14,6 +14,7 @@ import type {
   InterbeingWatcherV0LocalDispatchRole,
   InterbeingWatcherV0ReceiptLineage,
   InterbeingWatcherV0ReceiptLocalDispatch,
+  InterbeingWatcherV0ReceiptTaskContract,
 } from "./watcher_v0_support.ts";
 
 type JsonObject = Record<string, unknown>;
@@ -38,6 +39,7 @@ const LOCAL_DISPATCH_ALLOWED_KEYS = [
   "role",
   "sleep_ms",
   "source_role",
+  "task_contract",
   "target_role",
   "worker_limit",
 ] as const;
@@ -57,6 +59,13 @@ const LOCAL_CHILD_ALLOWED_KEYS = [
   "role",
   "sleep_ms",
   "task_id",
+] as const;
+const LOCAL_TASK_CONTRACT_ALLOWED_KEYS = [
+  "acceptance_criteria",
+  "execution_notes",
+  "review_mode",
+  "task_class",
+  "worker_limit",
 ] as const;
 
 export type InterbeingLocalDispatchFailureReasonCode =
@@ -79,6 +88,7 @@ type NormalizedLocalDispatchSpec = {
   result: JsonObject | null;
   role: InterbeingWatcherV0LocalDispatchRole;
   sleepMs: number;
+  taskContract: InterbeingWatcherV0ReceiptTaskContract | null;
   workerLimit: number;
 };
 
@@ -193,6 +203,24 @@ function asOptionalArray(value: unknown, label: string): unknown[] {
   return value;
 }
 
+function asOptionalStringArray(value: unknown, label: string): string[] | null {
+  if (value == null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array`);
+  }
+  const normalized: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = value[index];
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`${label}[${index}] must be a non-empty string`);
+    }
+    normalized.push(entry.trim());
+  }
+  return normalized;
+}
+
 function asNonNegativeInteger(value: unknown, label: string): number | null {
   if (value == null) {
     return null;
@@ -234,6 +262,7 @@ function normalizeRootLineage(
   envelope: InterbeingTaskEnvelopeV0,
   role: InterbeingWatcherV0LocalDispatchRole,
   value: unknown,
+  taskContract?: InterbeingWatcherV0ReceiptTaskContract | null,
 ): InterbeingWatcherV0ReceiptLineage {
   if (value == null) {
     return {
@@ -277,6 +306,7 @@ function normalizeRootLineage(
         lineage,
         reviewer_gate: null,
         role,
+        ...(taskContract == null ? {} : { task_contract: taskContract }),
         worker_pool: null,
       },
     });
@@ -288,6 +318,7 @@ function normalizeFlatRootLineage(
   envelope: InterbeingTaskEnvelopeV0,
   role: InterbeingWatcherV0LocalDispatchRole,
   record: JsonObject,
+  taskContract?: InterbeingWatcherV0ReceiptTaskContract | null,
 ): InterbeingWatcherV0ReceiptLineage | null {
   const hasFlatLineage =
     record.chain_id != null ||
@@ -299,13 +330,18 @@ function normalizeFlatRootLineage(
     return null;
   }
 
-  return normalizeRootLineage(envelope, role, {
-    chain_id: record.chain_id,
-    hop_count: record.hop_count,
-    max_hops: record.max_hops,
-    parent_role: record.source_role,
-    parent_task_id: record.parent_task_id,
-  });
+  return normalizeRootLineage(
+    envelope,
+    role,
+    {
+      chain_id: record.chain_id,
+      hop_count: record.hop_count,
+      max_hops: record.max_hops,
+      parent_role: record.source_role,
+      parent_task_id: record.parent_task_id,
+    },
+    taskContract,
+  );
 }
 
 function lineagesMatch(
@@ -332,6 +368,69 @@ function normalizeWorkerLimit(value: unknown): number {
   return Math.min(MAX_WORKER_LIMIT, parsed);
 }
 
+function asOptionalPositiveInteger(value: unknown, label: string): number | null {
+  const parsed = asNonNegativeInteger(value, label);
+  if (parsed == null) {
+    return null;
+  }
+  if (parsed === 0) {
+    throw new Error(`${label} must be greater than zero`);
+  }
+  return parsed;
+}
+
+function normalizeTaskContract(value: unknown): InterbeingWatcherV0ReceiptTaskContract | null {
+  if (value == null) {
+    return null;
+  }
+  const record = asPlainObject(value, "payload.local_dispatch.task_contract");
+  assertAllowedKeys(
+    record,
+    LOCAL_TASK_CONTRACT_ALLOWED_KEYS,
+    "payload.local_dispatch.task_contract",
+  );
+
+  const taskContract: InterbeingWatcherV0ReceiptTaskContract = {};
+  const acceptanceCriteria = asOptionalStringArray(
+    record.acceptance_criteria,
+    "payload.local_dispatch.task_contract.acceptance_criteria",
+  );
+  const executionNotes = asOptionalString(
+    record.execution_notes,
+    "payload.local_dispatch.task_contract.execution_notes",
+  );
+  const reviewMode = asOptionalString(
+    record.review_mode,
+    "payload.local_dispatch.task_contract.review_mode",
+  );
+  const taskClass = asOptionalString(
+    record.task_class,
+    "payload.local_dispatch.task_contract.task_class",
+  );
+  const workerLimit = asOptionalPositiveInteger(
+    record.worker_limit,
+    "payload.local_dispatch.task_contract.worker_limit",
+  );
+
+  if (acceptanceCriteria != null) {
+    taskContract.acceptance_criteria = acceptanceCriteria;
+  }
+  if (executionNotes != null) {
+    taskContract.execution_notes = executionNotes;
+  }
+  if (reviewMode != null) {
+    taskContract.review_mode = reviewMode;
+  }
+  if (taskClass != null) {
+    taskContract.task_class = taskClass;
+  }
+  if (workerLimit != null) {
+    taskContract.worker_limit = workerLimit;
+  }
+
+  return taskContract;
+}
+
 function createDispatchInvalidError(
   message: string,
   receiptContext?: InterbeingWatcherV0ReceiptLocalDispatch,
@@ -346,6 +445,7 @@ function createDispatchInvalidError(
 function createBaseReceiptContext(params: {
   lineage: InterbeingWatcherV0ReceiptLineage;
   role: InterbeingWatcherV0LocalDispatchRole;
+  taskContract?: InterbeingWatcherV0ReceiptTaskContract | null;
   workerLimit?: number | null;
 }): InterbeingWatcherV0ReceiptLocalDispatch {
   return {
@@ -353,6 +453,7 @@ function createBaseReceiptContext(params: {
     lineage: params.lineage,
     reviewer_gate: null,
     role: params.role,
+    ...(params.taskContract == null ? {} : { task_contract: params.taskContract }),
     worker_pool:
       params.workerLimit == null
         ? null
@@ -366,6 +467,7 @@ function createBaseReceiptContext(params: {
 function buildChildLineage(
   parentTaskId: string,
   parentLineage: InterbeingWatcherV0ReceiptLineage,
+  taskContract: InterbeingWatcherV0ReceiptTaskContract | null,
   workerLimit: number,
 ): InterbeingWatcherV0ReceiptLineage {
   const nextHop = parentLineage.hop_count + 1;
@@ -378,6 +480,7 @@ function buildChildLineage(
         lineage: parentLineage,
         reviewer_gate: null,
         role: "planner",
+        ...(taskContract == null ? {} : { task_contract: taskContract }),
         worker_pool: {
           limit: workerLimit,
           max_in_flight: 0,
@@ -397,6 +500,7 @@ function buildChildLineage(
 function normalizePlannerChild(
   envelope: InterbeingTaskEnvelopeV0,
   parentLineage: InterbeingWatcherV0ReceiptLineage,
+  taskContract: InterbeingWatcherV0ReceiptTaskContract | null,
   workerLimit: number,
   value: unknown,
   index: number,
@@ -414,6 +518,7 @@ function normalizePlannerChild(
       createBaseReceiptContext({
         lineage: parentLineage,
         role: "planner",
+        taskContract,
         workerLimit,
       }),
     );
@@ -438,7 +543,7 @@ function normalizePlannerChild(
       record.input,
       `payload.local_dispatch.planner_children[${index}].input`,
     ),
-    lineage: buildChildLineage(envelope.task_id, parentLineage, workerLimit),
+    lineage: buildChildLineage(envelope.task_id, parentLineage, taskContract, workerLimit),
     notes: asOptionalString(
       record.notes,
       `payload.local_dispatch.planner_children[${index}].notes`,
@@ -471,9 +576,12 @@ function normalizeLocalDispatchSpec(
     assertAllowedKeys(record, LOCAL_DISPATCH_ALLOWED_KEYS, `payload.${LOCAL_DISPATCH_KEY}`);
 
     const role = normalizeResolvedRole(record, `payload.${LOCAL_DISPATCH_KEY}`);
+    const taskContract = normalizeTaskContract(record.task_contract);
     const explicitLineage =
-      record.lineage == null ? null : normalizeRootLineage(envelope, role, record.lineage);
-    const flatLineage = normalizeFlatRootLineage(envelope, role, record);
+      record.lineage == null
+        ? null
+        : normalizeRootLineage(envelope, role, record.lineage, taskContract);
+    const flatLineage = normalizeFlatRootLineage(envelope, role, record, taskContract);
     if (
       explicitLineage != null &&
       flatLineage != null &&
@@ -483,7 +591,8 @@ function normalizeLocalDispatchSpec(
         `payload.${LOCAL_DISPATCH_KEY}.lineage conflicts with flat local_dispatch lineage fields`,
       );
     }
-    const lineage = explicitLineage ?? flatLineage ?? normalizeRootLineage(envelope, role, null);
+    const lineage =
+      explicitLineage ?? flatLineage ?? normalizeRootLineage(envelope, role, null, taskContract);
     const workerLimit = normalizeWorkerLimit(record.worker_limit);
     const plannerChildren = asOptionalArray(
       record.planner_children,
@@ -496,6 +605,7 @@ function normalizeLocalDispatchSpec(
         createBaseReceiptContext({
           lineage,
           role,
+          taskContract,
           workerLimit: role === "planner" ? workerLimit : null,
         }),
       );
@@ -503,7 +613,7 @@ function normalizeLocalDispatchSpec(
     if (plannerChildren.length > MAX_PLANNER_CHILDREN) {
       throw createDispatchInvalidError(
         `payload.${LOCAL_DISPATCH_KEY}.planner_children exceeds limit ${MAX_PLANNER_CHILDREN}`,
-        createBaseReceiptContext({ lineage, role: "planner", workerLimit }),
+        createBaseReceiptContext({ lineage, role: "planner", taskContract, workerLimit }),
       );
     }
 
@@ -513,13 +623,14 @@ function normalizeLocalDispatchSpec(
       lineage,
       notes: asOptionalString(record.notes, `payload.${LOCAL_DISPATCH_KEY}.notes`),
       plannerChildren: plannerChildren.map((entry, index) =>
-        normalizePlannerChild(envelope, lineage, workerLimit, entry, index),
+        normalizePlannerChild(envelope, lineage, taskContract, workerLimit, entry, index),
       ),
       result: asOptionalResultObject(record.result, `payload.${LOCAL_DISPATCH_KEY}.result`),
       role,
       sleepMs: clampSleepMs(
         asNonNegativeInteger(record.sleep_ms, `payload.${LOCAL_DISPATCH_KEY}.sleep_ms`),
       ),
+      taskContract,
       workerLimit,
     };
   } catch (error) {
@@ -565,6 +676,9 @@ function buildDispatchNotes(params: {
     params.receiptContext?.reviewer_gate == null
       ? "- reviewer gate: none"
       : `- reviewer gate: required \`${params.receiptContext.reviewer_gate.required}\`, approved \`${params.receiptContext.reviewer_gate.approved}\``,
+    params.receiptContext?.task_contract == null
+      ? "- task contract: none"
+      : `- task contract: \`${JSON.stringify(params.receiptContext.task_contract)}\``,
     "",
     "Summary:",
     "```json",
@@ -690,6 +804,7 @@ async function executePlannerRole(params: {
   const receiptContext = createBaseReceiptContext({
     lineage: params.spec.lineage,
     role: "planner",
+    taskContract: params.spec.taskContract,
     workerLimit: params.spec.workerLimit,
   });
 
@@ -865,6 +980,7 @@ async function executeRootRole(params: {
   const receiptContext = createBaseReceiptContext({
     lineage: params.spec.lineage,
     role: params.spec.role,
+    taskContract: params.spec.taskContract,
   });
   if (params.spec.role === "executor") {
     const output = await runExecutorRole({
