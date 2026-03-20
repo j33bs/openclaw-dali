@@ -143,9 +143,24 @@ describe("interbeing watcher v0 hardening", () => {
     expect(result.summary.inputSource).toBe("inline default submit_task envelope");
     expect(result.summary.statusFlow).toEqual(["queued", "running", "succeeded"]);
     expect(result.summary.artifactDir).toContain("interbeing-e2e-local-v0");
+    expect(result.summary.resultRefUri).toMatch(/^file:\/\//);
+
+    const succeededStatus = await readJsonFile<{ result_ref: { uri: string } | null }>(
+      path.join(outputDir, "task-status-succeeded.json"),
+    );
+    expect(succeededStatus.result_ref?.uri).toBe(result.summary.resultRefUri);
+
+    const resultSummary = await readJsonFile<{ outcome: string; task_id: string }>(
+      path.join(outputDir, "result-summary.json"),
+    );
+    expect(resultSummary).toMatchObject({
+      outcome: "succeeded",
+      task_id: "task-local-e2e-001",
+    });
 
     const notes = await readTextFile(path.join(outputDir, "e2e-notes.md"));
     expect(notes).toContain(DEFAULT_INTERBEING_DIR);
+    expect(notes).toContain("result-summary.json");
   });
 
   it("classifies invalid schema_version failures and writes a failed receipt", async () => {

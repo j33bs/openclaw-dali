@@ -36,6 +36,11 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - log: `workspace/audit/interbeing_watcher_v0.log`
 - lifecycle output: `workspace/audit/interbeing-watcher-v0/last-run/`
 
+Successful runs now persist a small success artifact in the lifecycle output
+directory and point the terminal `task-status-succeeded.json` `result_ref.uri`
+at that file. For the plain local harness this is `result-summary.json`; for
+local-dispatch flows it remains `dispatch-summary.json`.
+
 ## Receipts
 
 Every moved processed, failed, or skipped artifact gets an adjacent receipt:

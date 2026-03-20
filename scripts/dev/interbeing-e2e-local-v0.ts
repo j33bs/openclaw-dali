@@ -200,6 +200,7 @@ function buildNotes(params: {
   inputSource: string;
   interbeingDir: string;
   outputDir: string;
+  resultSummaryPath: string;
   representativeEvent: InterbeingEventEnvelopeV0;
   statuses: InterbeingTaskStatusV0[];
   validation: InterbeingE2EValidationSummary;
@@ -221,6 +222,7 @@ function buildNotes(params: {
     `- input source: \`${params.inputSource}\``,
     `- interbeing schema source: \`${params.interbeingDir}\``,
     `- artifact directory: \`${params.outputDir}\``,
+    `- result summary: \`${params.resultSummaryPath}\``,
     "",
     "Lifecycle emitted:",
     `- task-status flow: \`${statusFlow}\``,
@@ -247,10 +249,16 @@ export async function runInterbeingE2ELocalV0(
 
   const loadedInput = await loadInputEnvelope({ inputPath: options.inputPath });
   const parsedEnvelope = parseSubmitTaskEnvelopeV0(loadedInput.inputEnvelope);
+  const resultSummaryPath = path.join(outputDir, "result-summary.json");
+  const resultRef = {
+    uri: `file://${resultSummaryPath}`,
+    content_type: "application/json",
+  } as const;
   const lifecycle = emitLocalTaskLifecycleV0(parsedEnvelope, {
     createEventId: createDeterministicEventIdSource(),
     now: createDeterministicTimestampSource(),
     queuedMessage: "Accepted for local Dali execution.",
+    resultRef,
     runningMessage: "Running local interbeing v0 harness.",
     terminalMessage: "Local interbeing v0 harness completed successfully.",
   });
@@ -278,12 +286,24 @@ export async function runInterbeingE2ELocalV0(
     eventEnvelope: "direct_schema",
   };
 
+  const resultSummary: JsonObject = {
+    correlation_id: parsedEnvelope.correlation_id,
+    generated_at: succeededStatus.updated_at,
+    input_mode: loadedInput.inputMode,
+    input_source: loadedInput.inputSource,
+    outcome: "succeeded",
+    requestor: parsedEnvelope.requestor,
+    target_node: parsedEnvelope.target_node,
+    task_id: parsedEnvelope.task_id,
+  };
+
   await Promise.all([
     writeJsonFile(path.join(outputDir, "input-submit-task.json"), parsedEnvelope),
     writeJsonFile(path.join(outputDir, "task-status-queued.json"), queuedStatus),
     writeJsonFile(path.join(outputDir, "task-status-running.json"), runningStatus),
     writeJsonFile(path.join(outputDir, "task-status-succeeded.json"), succeededStatus),
     writeJsonFile(path.join(outputDir, "event-envelope.json"), representativeEvent),
+    writeJsonFile(resultSummaryPath, resultSummary),
     writeTextFile(
       path.join(outputDir, "e2e-notes.md"),
       buildNotes({
@@ -291,6 +311,7 @@ export async function runInterbeingE2ELocalV0(
         inputSource: loadedInput.inputSource,
         interbeingDir,
         outputDir,
+        resultSummaryPath,
         representativeEvent,
         statuses: lifecycle.statuses,
         validation,
@@ -303,6 +324,7 @@ export async function runInterbeingE2ELocalV0(
     eventType: representativeEvent.event_type,
     inputMode: loadedInput.inputMode,
     inputSource: loadedInput.inputSource,
+    resultRefUri: resultRef.uri,
     statusFlow: lifecycle.statuses.map((entry) => entry.status),
     validation,
   };
