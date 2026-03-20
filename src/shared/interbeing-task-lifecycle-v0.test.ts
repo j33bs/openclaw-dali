@@ -1,5 +1,9 @@
-import AjvPkg from "ajv";
+import type { ValidateFunction } from "ajv";
+import Ajv2020Pkg from "ajv/dist/2020";
 import { describe, expect, it } from "vitest";
+import eventEnvelopeSchemaV0 from "../../schemas/event-envelope.v0.json" with { type: "json" };
+import taskEnvelopeSchemaV0 from "../../schemas/task-envelope.v0.json" with { type: "json" };
+import taskStatusSchemaV0 from "../../schemas/task-status.v0.json" with { type: "json" };
 import {
   createEventEnvelopeV0,
   createTaskStatusV0,
@@ -7,7 +11,7 @@ import {
   parseSubmitTaskEnvelopeV0,
 } from "./interbeing-task-lifecycle-v0.js";
 
-const Ajv = AjvPkg as unknown as typeof AjvPkg;
+const Ajv = Ajv2020Pkg as unknown as typeof Ajv2020Pkg;
 const ajv = new Ajv({ allErrors: true, strict: false });
 
 ajv.addFormat("date-time", {
@@ -17,105 +21,11 @@ ajv.addFormat("date-time", {
     !Number.isNaN(Date.parse(value)),
 });
 
-const taskEnvelopeSchemaV0 = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "schema_version",
-    "operation",
-    "task_id",
-    "requestor",
-    "target_node",
-    "correlation_id",
-    "created_at",
-    "payload",
-  ],
-  properties: {
-    schema_version: { const: "v0" },
-    operation: { type: "string", enum: ["submit_task"] },
-    task_id: { type: "string", minLength: 1 },
-    requestor: { type: "string", minLength: 1 },
-    target_node: { type: "string", minLength: 1 },
-    correlation_id: { type: "string", minLength: 1 },
-    created_at: { type: "string", format: "date-time" },
-    payload: { type: "object" },
-  },
-} as const;
-
-const taskStatusSchemaV0 = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "schema_version",
-    "task_id",
-    "node_id",
-    "status",
-    "updated_at",
-    "progress_message",
-    "result_ref",
-    "error",
-  ],
-  properties: {
-    schema_version: { const: "v0" },
-    task_id: { type: "string", minLength: 1 },
-    node_id: { type: "string", minLength: 1 },
-    status: {
-      type: "string",
-      enum: ["queued", "running", "succeeded", "failed", "cancelled"],
-    },
-    updated_at: { type: "string", format: "date-time" },
-    progress_message: { type: ["string", "null"] },
-    result_ref: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      required: ["uri"],
-      properties: {
-        uri: { type: "string", minLength: 1 },
-        content_type: { type: "string", minLength: 1 },
-        expires_at: { type: "string", format: "date-time" },
-      },
-    },
-    error: {
-      type: ["object", "null"],
-      additionalProperties: false,
-      required: ["code"],
-      properties: {
-        code: { type: "string", minLength: 1 },
-        message: { type: "string" },
-        retryable: { type: "boolean" },
-      },
-    },
-  },
-} as const;
-
-const eventEnvelopeSchemaV0 = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "schema_version",
-    "event_id",
-    "event_type",
-    "node_id",
-    "correlation_id",
-    "timestamp",
-    "payload",
-  ],
-  properties: {
-    schema_version: { const: "v0" },
-    event_id: { type: "string", minLength: 1 },
-    event_type: { type: "string", minLength: 1 },
-    node_id: { type: "string", minLength: 1 },
-    correlation_id: { type: "string", minLength: 1 },
-    timestamp: { type: "string", format: "date-time" },
-    payload: { type: "object" },
-  },
-} as const;
-
 const validateTaskEnvelope = ajv.compile(taskEnvelopeSchemaV0);
 const validateTaskStatus = ajv.compile(taskStatusSchemaV0);
 const validateEventEnvelope = ajv.compile(eventEnvelopeSchemaV0);
 
-function expectSchemaMatch(validate: typeof validateTaskEnvelope, value: unknown): void {
+function expectSchemaMatch(validate: ValidateFunction, value: unknown): void {
   const ok = validate(value);
   expect(ok, JSON.stringify(validate.errors)).toBe(true);
 }

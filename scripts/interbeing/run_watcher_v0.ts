@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { DEFAULT_INTERBEING_DIR } from "./interbeing_paths.ts";
 import {
   getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
@@ -14,12 +15,31 @@ type RunWatcherV0Options = {
 };
 
 type ParsedCommand =
-  | { kind: "watch"; mode: InterbeingWatcherV0Mode }
+  | { kind: "watch"; mode: InterbeingWatcherV0Mode; interbeingDir?: string }
   | { kind: "health" }
   | { kind: "status" }
   | { kind: "list"; limit: number }
-  | { kind: "verify"; filename?: string; sha256?: string }
+  | { kind: "verify"; filename?: string; sha256?: string; interbeingDir?: string }
   | { file: string; forceReprocess: boolean; kind: "replay" };
+
+function stripGlobalFlags(argv: string[]): { interbeingDir?: string; argv: string[] } {
+  const nextArgv: string[] = [];
+  let interbeingDir: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--interbeing-dir") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--interbeing-dir requires a value");
+      }
+      interbeingDir = value;
+      index += 1;
+      continue;
+    }
+    nextArgv.push(arg);
+  }
+  return { interbeingDir, argv: nextArgv };
+}
 
 function readFlagValue(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -34,9 +54,10 @@ function readFlagValue(argv: string[], name: string): string | undefined {
 }
 
 function parseCommand(argv: string[]): ParsedCommand {
-  const command = argv[0];
+  const { interbeingDir, argv: strippedArgv } = stripGlobalFlags(argv);
+  const command = strippedArgv[0];
   if (command === "start" || command === "once") {
-    return { kind: "watch", mode: command };
+    return { kind: "watch", interbeingDir, mode: command };
   }
   if (command === "status") {
     return { kind: "status" };
@@ -45,7 +66,7 @@ function parseCommand(argv: string[]): ParsedCommand {
     return { kind: "health" };
   }
   if (command === "list") {
-    const rawLimit = readFlagValue(argv, "--limit");
+    const rawLimit = readFlagValue(strippedArgv, "--limit");
     const limit = rawLimit == null ? 10 : Number.parseInt(rawLimit, 10);
     if (!Number.isFinite(limit) || limit < 0) {
       throw new Error("--limit must be a non-negative integer");
@@ -53,26 +74,26 @@ function parseCommand(argv: string[]): ParsedCommand {
     return { kind: "list", limit };
   }
   if (command === "verify") {
-    const filename = readFlagValue(argv, "--filename");
-    const sha256 = readFlagValue(argv, "--sha256");
+    const filename = readFlagValue(strippedArgv, "--filename");
+    const sha256 = readFlagValue(strippedArgv, "--sha256");
     if (!filename && !sha256) {
       throw new Error("verify requires --filename or --sha256");
     }
-    return { kind: "verify", filename, sha256 };
+    return { kind: "verify", filename, interbeingDir, sha256 };
   }
   if (command === "replay") {
-    const file = readFlagValue(argv, "--file");
+    const file = readFlagValue(strippedArgv, "--file");
     if (!file) {
       throw new Error("replay requires --file");
     }
     return {
       kind: "replay",
       file,
-      forceReprocess: argv.includes("--force-reprocess"),
+      forceReprocess: strippedArgv.includes("--force-reprocess"),
     };
   }
   throw new Error(
-    "Usage: pnpm tsx scripts/interbeing/run_watcher_v0.ts <start|once|status|health|list|verify|replay>",
+    "Usage: pnpm tsx scripts/interbeing/run_watcher_v0.ts [--interbeing-dir <path>] <start|once|status|health|list|verify|replay>",
   );
 }
 
@@ -81,7 +102,10 @@ export async function runWatcherCliV0(options: RunWatcherV0Options = {}): Promis
   const result = await (async () => {
     switch (command.kind) {
       case "watch":
-        return runInterbeingWatcherV0({ mode: command.mode });
+        return runInterbeingWatcherV0({
+          interbeingDir: command.interbeingDir ?? DEFAULT_INTERBEING_DIR,
+          mode: command.mode,
+        });
       case "status":
         return getInterbeingWatcherV0Status();
       case "health":

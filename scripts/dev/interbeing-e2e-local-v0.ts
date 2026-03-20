@@ -1,5 +1,4 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ValidateFunction } from "ajv";
@@ -12,11 +11,11 @@ import {
   type InterbeingTaskStatusV0,
   type LocalTaskLifecycleEmissionV0,
 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
+import { DEFAULT_INTERBEING_DIR } from "../interbeing/interbeing_paths.ts";
 
 type JsonObject = Record<string, unknown>;
 type JsonSchema = Record<string, unknown>;
 
-export const DEFAULT_INTERBEING_DIR = path.join(os.homedir(), "src", "openclaw-interbeing");
 export const DEFAULT_OUTPUT_DIR = path.join(
   process.cwd(),
   "workspace",

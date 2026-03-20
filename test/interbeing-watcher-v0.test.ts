@@ -2,6 +2,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runInterbeingE2ELocalV0 } from "../scripts/dev/interbeing-e2e-local-v0.ts";
+import { DEFAULT_INTERBEING_DIR } from "../scripts/interbeing/interbeing_paths.ts";
 import {
   getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
@@ -115,6 +117,10 @@ async function createSuccessfulLifecycleRunner(outputDir: string): Promise<void>
   );
 }
 
+async function readTextFile(filePath: string): Promise<string> {
+  return readFile(filePath, "utf8");
+}
+
 afterEach(async () => {
   await Promise.all(
     createdRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -122,6 +128,26 @@ afterEach(async () => {
 });
 
 describe("interbeing watcher v0 hardening", () => {
+  it("runs the local E2E harness with repo-local vendored schemas by default", async () => {
+    const cwd = await createTempRepoRoot();
+    const outputDir = path.join(cwd, "workspace", "audit", "_evidence", "interbeing-e2e-local-v0");
+    const result = await runInterbeingE2ELocalV0({
+      outputDir,
+    });
+
+    expect(result.validation).toEqual({
+      inputSubmitTask: "direct_schema",
+      taskStatuses: "direct_schema",
+      eventEnvelope: "direct_schema",
+    });
+    expect(result.summary.inputSource).toBe("inline default submit_task envelope");
+    expect(result.summary.statusFlow).toEqual(["queued", "running", "succeeded"]);
+    expect(result.summary.artifactDir).toContain("interbeing-e2e-local-v0");
+
+    const notes = await readTextFile(path.join(outputDir, "e2e-notes.md"));
+    expect(notes).toContain(DEFAULT_INTERBEING_DIR);
+  });
+
   it("classifies invalid schema_version failures and writes a failed receipt", async () => {
     const cwd = await createTempRepoRoot();
     const paths = resolveInterbeingWatcherV0Paths(cwd);

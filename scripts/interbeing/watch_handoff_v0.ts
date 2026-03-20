@@ -2,7 +2,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import chokidar from "chokidar";
 import { parseSubmitTaskEnvelopeV0 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
-import { DEFAULT_INTERBEING_DIR } from "../dev/interbeing-e2e-local-v0.ts";
+import { DEFAULT_INTERBEING_DIR } from "./interbeing_paths.ts";
 import {
   isInterbeingLocalDispatchError,
   runInterbeingLocalDispatchV0,

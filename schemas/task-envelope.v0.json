@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/schemas/task-envelope.v0.json",
+  "title": "Interbeing Task Envelope v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation",
+    "task_id",
+    "requestor",
+    "target_node",
+    "correlation_id",
+    "created_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "v0"
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["submit_task"]
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_node": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

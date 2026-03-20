@@ -5,7 +5,7 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 ## Commands
 
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts start`
-  Runs the single-threaded watcher against `handoff/incoming/dali/`.
+  Runs the single-threaded watcher against `handoff/incoming/dali/` using the repo-local vendored schemas in `schemas/`.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts once`
   Processes the current queue and exits.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts status`
@@ -21,6 +21,8 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
   Copies a failed artifact back into intake.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts replay --file handoff/processed/dali/<file> --force-reprocess`
   Explicitly overrides idempotency once for a known processed hash.
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts start --interbeing-dir /path/to/openclaw-interbeing`
+  Overrides the schema root if you need to point at an external checkout.
 - `scripts/interbeing/run_watcher_v0_service.sh start`
   Runs the long-lived watcher with an explicit repo-root working directory for systemd user service use.
 
@@ -80,6 +82,7 @@ systemctl --user disable --now openclaw-interbeing-watcher.service
 Notes:
 
 - The unit assumes the Dali checkout lives at `~/src/openclaw-dali`.
+- The watcher now defaults to the vendored repo-local schema root under this checkout; use `--interbeing-dir` only when you intentionally want an external checkout.
 - The service follows the repo-standard long-running user-unit envelope: `Restart=always`, `RestartSec=5`, `TimeoutStartSec=30`, `TimeoutStopSec=30`.
 - `once` remains available for bounded recovery or smoke checks, but the service is the normal operator surface for continuous intake.
 - Replay and `--force-reprocess` remain valid while the service is running; queue mutation is serialized through `workspace/state/interbeing_watcher_v0.lock` so state updates are not clobbered by the long-running watcher.

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/schemas/task-status.v0.json",
+  "title": "Interbeing Task Status v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "node_id",
+    "status",
+    "updated_at",
+    "progress_message",
+    "result_ref",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "v0"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "progress_message": {
+      "type": ["string", "null"]
+    },
+    "result_ref": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
