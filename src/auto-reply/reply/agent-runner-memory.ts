@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
@@ -155,6 +156,43 @@ type SessionLogSnapshot = {
   byteSize?: number;
   usage?: SessionTranscriptUsageSnapshot;
 };
+
+type MemoryFlushTargetSnapshot = {
+  exists: boolean;
+  size: number;
+};
+
+export async function readMemoryFlushTargetSnapshot(params: {
+  workspaceDir?: string;
+  relativePath: string;
+}): Promise<MemoryFlushTargetSnapshot> {
+  const workspaceDir = params.workspaceDir?.trim();
+  if (!workspaceDir) {
+    return { exists: false, size: 0 };
+  }
+
+  try {
+    const stat = await fs.promises.stat(path.resolve(workspaceDir, params.relativePath));
+    const size = Math.floor(stat.size);
+    return {
+      exists: true,
+      size: Number.isFinite(size) && size >= 0 ? size : 0,
+    };
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ENOENT") {
+      return { exists: false, size: 0 };
+    }
+    throw error;
+  }
+}
+
+export function didMemoryFlushAppend(
+  before: MemoryFlushTargetSnapshot,
+  after: MemoryFlushTargetSnapshot,
+): boolean {
+  return after.exists && after.size > before.size;
+}
 
 async function readSessionLogSnapshot(params: {
   sessionId?: string;
@@ -476,6 +514,10 @@ export async function runMemoryFlushIfNeeded(params: {
   ]
     .filter(Boolean)
     .join("\n\n");
+  const targetSnapshotBefore = await readMemoryFlushTargetSnapshot({
+    workspaceDir: params.followupRun.run.workspaceDir,
+    relativePath: memoryFlushWritePath,
+  });
   try {
     await runWithModelFallback({
       ...resolveModelFallbackOptions(params.followupRun.run),
@@ -534,9 +576,25 @@ export async function runMemoryFlushIfNeeded(params: {
       });
       if (typeof nextCount === "number") {
         memoryFlushCompactionCount = nextCount;
+        if (activeSessionEntry) {
+          activeSessionEntry = {
+            ...activeSessionEntry,
+            compactionCount: nextCount,
+          };
+        }
       }
     }
-    if (params.storePath && params.sessionKey) {
+    const targetSnapshotAfter = await readMemoryFlushTargetSnapshot({
+      workspaceDir: params.followupRun.run.workspaceDir,
+      relativePath: memoryFlushWritePath,
+    });
+    const wroteDurableMemory = didMemoryFlushAppend(targetSnapshotBefore, targetSnapshotAfter);
+    if (!wroteDurableMemory) {
+      logVerbose(
+        `memory flush completed without appending durable memory: sessionKey=${params.sessionKey} target=${memoryFlushWritePath}`,
+      );
+    }
+    if (wroteDurableMemory && params.storePath && params.sessionKey) {
       try {
         const updatedEntry = await updateSessionStoreEntry({
           storePath: params.storePath,

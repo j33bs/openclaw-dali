@@ -48,7 +48,7 @@ function buildMemorySection(params: {
   }
   const lines = [
     "## Memory Recall",
-    "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
+    "Before answering or acting on anything about prior work, unfinished tasks, changes, bugs, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If the request is about recent operational work, prioritize recent daily notes. If low confidence after search, say you checked.",
   ];
   if (params.citationsMode === "off") {
     lines.push(

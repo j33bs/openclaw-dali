@@ -16,10 +16,19 @@ const MEMORY_FLUSH_APPEND_ONLY_HINT =
   "If memory/YYYY-MM-DD.md already exists, APPEND new content only and do not overwrite existing entries.";
 const MEMORY_FLUSH_READ_ONLY_HINT =
   "Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.";
+const MEMORY_FLUSH_STRUCTURE_HINT =
+  "When there is something durable to store, append a compact summary that covers: decisions/directives, concrete changes completed, bugs or blockers still open, important artifacts/paths/IDs, and next steps.";
+const MEMORY_FLUSH_SPECIFICITY_HINT =
+  "Prefer concrete operational facts over abstract themes so a future agent can resume work without rereading the full transcript.";
+const MEMORY_FLUSH_COMPRESSION_HINT =
+  "Do not dump the raw transcript; compress it into durable takeaways only.";
 const MEMORY_FLUSH_REQUIRED_HINTS = [
   MEMORY_FLUSH_TARGET_HINT,
   MEMORY_FLUSH_APPEND_ONLY_HINT,
   MEMORY_FLUSH_READ_ONLY_HINT,
+  MEMORY_FLUSH_STRUCTURE_HINT,
+  MEMORY_FLUSH_SPECIFICITY_HINT,
+  MEMORY_FLUSH_COMPRESSION_HINT,
 ];
 
 export const DEFAULT_MEMORY_FLUSH_PROMPT = [
@@ -27,6 +36,9 @@ export const DEFAULT_MEMORY_FLUSH_PROMPT = [
   MEMORY_FLUSH_TARGET_HINT,
   MEMORY_FLUSH_READ_ONLY_HINT,
   MEMORY_FLUSH_APPEND_ONLY_HINT,
+  MEMORY_FLUSH_STRUCTURE_HINT,
+  MEMORY_FLUSH_SPECIFICITY_HINT,
+  MEMORY_FLUSH_COMPRESSION_HINT,
   "Do NOT create timestamped variant files (e.g., YYYY-MM-DD-HHMM.md); always use the canonical YYYY-MM-DD.md filename.",
   `If nothing to store, reply with ${SILENT_REPLY_TOKEN}.`,
 ].join(" ");
@@ -37,6 +49,9 @@ export const DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT = [
   MEMORY_FLUSH_TARGET_HINT,
   MEMORY_FLUSH_READ_ONLY_HINT,
   MEMORY_FLUSH_APPEND_ONLY_HINT,
+  MEMORY_FLUSH_STRUCTURE_HINT,
+  MEMORY_FLUSH_SPECIFICITY_HINT,
+  MEMORY_FLUSH_COMPRESSION_HINT,
   `You may reply, but usually ${SILENT_REPLY_TOKEN} is correct.`,
 ].join(" ");
 

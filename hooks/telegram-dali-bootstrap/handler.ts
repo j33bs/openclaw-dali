@@ -4,11 +4,14 @@ import path from "node:path";
 const TARGET_AGENT_ID = "telegram-dali";
 const DEFAULT_BOOTSTRAP_ROOT = path.join("nodes", "dali", "bootstrap");
 const DEFAULT_OVERRIDES: Record<string, string> = {
+  "AGENTS.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "AGENTS.md"),
   "IDENTITY.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "IDENTITY.md"),
   "USER.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "USER.md"),
   "MEMORY.md": path.join("nodes", "dali", "MEMORY.md"),
 };
+const APPEND_ONLY_FILES = new Set(["AGENTS.md"]);
 const OVERRIDE_ENV_NAMES: Record<string, string> = {
+  "AGENTS.md": "OPENCLAW_DALI_BOOTSTRAP_AGENTS_PATH",
   "IDENTITY.md": "OPENCLAW_DALI_BOOTSTRAP_IDENTITY_PATH",
   "USER.md": "OPENCLAW_DALI_BOOTSTRAP_USER_PATH",
   "MEMORY.md": "OPENCLAW_DALI_BOOTSTRAP_MEMORY_PATH",
@@ -45,7 +48,7 @@ function resolveOverridePath(name: string): string | null {
   }
 
   const bootstrapRoot = readTrimmedEnv(BOOTSTRAP_ROOT_ENV_NAME);
-  if (bootstrapRoot && (name === "IDENTITY.md" || name === "USER.md")) {
+  if (bootstrapRoot && (name === "AGENTS.md" || name === "IDENTITY.md" || name === "USER.md")) {
     return path.join(bootstrapRoot, name);
   }
 
@@ -91,6 +94,7 @@ export default async function telegramDaliBootstrapHook(event: BootstrapEvent) {
   }
 
   const replacements = new Map<string, BootstrapFile>();
+  const appendOnly = new Map<string, BootstrapFile>();
   // Compatibility order: file-specific env override, shared bootstrap root env, legacy repo-relative default.
   for (const name of Object.keys(DEFAULT_OVERRIDES)) {
     const relPath = resolveOverridePath(name);
@@ -99,10 +103,14 @@ export default async function telegramDaliBootstrapHook(event: BootstrapEvent) {
     }
     const loaded = await loadOverride(workspaceDir, name, relPath);
     if (loaded) {
-      replacements.set(name, loaded);
+      if (APPEND_ONLY_FILES.has(name)) {
+        appendOnly.set(name, loaded);
+      } else {
+        replacements.set(name, loaded);
+      }
     }
   }
-  if (replacements.size === 0) {
+  if (replacements.size === 0 && appendOnly.size === 0) {
     return;
   }
 
@@ -121,6 +129,12 @@ export default async function telegramDaliBootstrapHook(event: BootstrapEvent) {
   for (const [name, replacement] of replacements.entries()) {
     if (!seen.has(name)) {
       next.push(replacement);
+    }
+  }
+
+  for (const addition of appendOnly.values()) {
+    if (!next.some((file) => file.path === addition.path)) {
+      next.push(addition);
     }
   }
 

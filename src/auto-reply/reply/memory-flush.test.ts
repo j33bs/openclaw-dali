@@ -61,4 +61,13 @@ describe("DEFAULT_MEMORY_FLUSH_PROMPT", () => {
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("timestamped variant");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("YYYY-MM-DD.md");
   });
+
+  it("requires compact operational summaries instead of vague transcript dumps", () => {
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("decisions/directives");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("concrete changes completed");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("bugs or blockers still open");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("next steps");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("Prefer concrete operational facts");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("Do not dump the raw transcript");
+  });
 });

@@ -29,10 +29,58 @@ REQUIRED_INTERNAL_HOOK = "telegram-dali-bootstrap"
 REQUIRED_REPO_FILES = (
     Path("hooks/telegram-dali-bootstrap/HOOK.md"),
     Path("hooks/telegram-dali-bootstrap/handler.ts"),
+    Path("nodes/dali/bootstrap/AGENTS.md"),
     Path("nodes/dali/bootstrap/IDENTITY.md"),
     Path("nodes/dali/bootstrap/USER.md"),
     Path("nodes/dali/MEMORY.md"),
 )
+
+
+def _resolve_telegram_memory_search(
+    cfg: Dict[str, object], agent_id: str
+) -> Tuple[bool, bool, List[str]]:
+    agents_cfg = cfg.get("agents")
+    defaults = agents_cfg.get("defaults") if isinstance(agents_cfg, dict) else None
+    defaults_memory = defaults.get("memorySearch") if isinstance(defaults, dict) else None
+    agent = _agent_by_id(cfg, agent_id)
+    agent_memory = agent.get("memorySearch") if isinstance(agent, dict) else None
+
+    enabled = True
+    experimental_session_memory = False
+    sources: List[str] = ["memory"]
+
+    if isinstance(defaults_memory, dict):
+        if isinstance(defaults_memory.get("enabled"), bool):
+            enabled = defaults_memory["enabled"]
+        experimental = defaults_memory.get("experimental")
+        if isinstance(experimental, dict) and isinstance(
+            experimental.get("sessionMemory"), bool
+        ):
+            experimental_session_memory = experimental["sessionMemory"]
+        raw_sources = defaults_memory.get("sources")
+        if isinstance(raw_sources, list) and raw_sources:
+            sources = [str(item).strip() for item in raw_sources if str(item).strip()]
+
+    if isinstance(agent_memory, dict):
+        if isinstance(agent_memory.get("enabled"), bool):
+            enabled = agent_memory["enabled"]
+        experimental = agent_memory.get("experimental")
+        if isinstance(experimental, dict) and isinstance(
+            experimental.get("sessionMemory"), bool
+        ):
+            experimental_session_memory = experimental["sessionMemory"]
+        raw_sources = agent_memory.get("sources")
+        if isinstance(raw_sources, list) and raw_sources:
+            sources = [str(item).strip() for item in raw_sources if str(item).strip()]
+
+    normalized_sources = []
+    seen = set()
+    for item in sources:
+        if item and item not in seen:
+            seen.add(item)
+            normalized_sources.append(item)
+
+    return enabled, experimental_session_memory, normalized_sources or ["memory"]
 
 
 def _repo_root() -> Path:
@@ -113,6 +161,18 @@ def validate_openclaw_config(cfg: Dict[str, object]) -> List[str]:
             name = str(identity.get("name", "")).strip()
             if name != EXPECTED_TELEGRAM_IDENTITY_NAME:
                 issues.append(f"telegram_agent_identity:{name or 'missing'}")
+
+        memory_enabled, session_memory_enabled, sources = _resolve_telegram_memory_search(
+            cfg, TELEGRAM_AGENT_ID
+        )
+        if not memory_enabled:
+            issues.append("telegram_agent_memory_search:disabled")
+        if not session_memory_enabled:
+            issues.append("telegram_agent_session_memory:disabled")
+        if "memory" not in sources:
+            issues.append(f"telegram_agent_memory_sources_missing:memory:{','.join(sources)}")
+        if "sessions" not in sources:
+            issues.append(f"telegram_agent_memory_sources_missing:sessions:{','.join(sources)}")
 
     has_binding = False
     for binding in _iter_route_bindings(cfg):

@@ -5,11 +5,7 @@ homepage: https://docs.openclaw.ai/automation/hooks
 metadata:
   {
     "openclaw":
-      {
-        "emoji": "🎨",
-        "events": ["agent:bootstrap"],
-        "requires": { "config": ["workspace.dir"] },
-      },
+      { "emoji": "🎨", "events": ["agent:bootstrap"], "requires": { "config": ["workspace.dir"] } },
   }
 ---
 
@@ -23,6 +19,7 @@ workspace with full tool/file access.
 
 Default compatibility layout:
 
+- `nodes/dali/bootstrap/AGENTS.md`
 - `nodes/dali/bootstrap/IDENTITY.md`
 - `nodes/dali/bootstrap/USER.md`
 - `nodes/dali/MEMORY.md`
@@ -31,6 +28,7 @@ To decouple the hook from that exact layout, set one or more environment
 variables before the hook runs:
 
 - `OPENCLAW_DALI_BOOTSTRAP_ROOT`
+- `OPENCLAW_DALI_BOOTSTRAP_AGENTS_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_IDENTITY_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_USER_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_MEMORY_PATH`

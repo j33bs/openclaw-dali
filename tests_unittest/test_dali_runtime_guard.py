@@ -40,6 +40,11 @@ class DaliRuntimeGuardTests(unittest.TestCase):
                         "identity": {
                             "name": "Dali",
                         },
+                        "memorySearch": {
+                            "enabled": True,
+                            "experimental": {"sessionMemory": True},
+                            "sources": ["memory", "sessions"],
+                        },
                     },
                     {
                         "id": "discord-gpt54",
@@ -114,6 +119,18 @@ class DaliRuntimeGuardTests(unittest.TestCase):
         del cfg["agents"]["list"][1]["identity"]
         issues = self.mod.validate_openclaw_config(cfg)
         self.assertIn("telegram_agent_identity:missing", issues)
+
+    def test_missing_session_memory_flag_fails(self):
+        cfg = self._good_config()
+        cfg["agents"]["list"][1]["memorySearch"]["experimental"]["sessionMemory"] = False
+        issues = self.mod.validate_openclaw_config(cfg)
+        self.assertIn("telegram_agent_session_memory:disabled", issues)
+
+    def test_missing_session_source_fails(self):
+        cfg = self._good_config()
+        cfg["agents"]["list"][1]["memorySearch"]["sources"] = ["memory"]
+        issues = self.mod.validate_openclaw_config(cfg)
+        self.assertIn("telegram_agent_memory_sources_missing:sessions:memory", issues)
 
     def test_disabled_internal_hook_fails(self):
         cfg = self._good_config()
