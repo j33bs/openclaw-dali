@@ -13,10 +13,10 @@ if [[ ${#ARGS[@]} -eq 0 ]]; then
 fi
 
 case "$MODE" in
-  start|once|status|health|list|verify|replay)
+  start|once|status|health|list|logs|report|verify|replay)
     ;;
   *)
-    echo "Usage: scripts/interbeing/run_watcher_v0_service.sh [start|once|status|health|list|verify|replay] [args...]" >&2
+    echo "Usage: scripts/interbeing/run_watcher_v0_service.sh [start|once|status|health|list|logs|report|verify|replay] [args...]" >&2
     exit 1
     ;;
 esac

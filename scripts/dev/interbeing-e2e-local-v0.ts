@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ValidateFunction } from "ajv";
-import Ajv2020Pkg from "ajv/dist/2020";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   emitLocalTaskLifecycleV0,
   parseSubmitTaskEnvelopeV0,
@@ -12,6 +12,7 @@ import {
   type LocalTaskLifecycleEmissionV0,
 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
 import { DEFAULT_INTERBEING_DIR } from "../interbeing/interbeing_paths.ts";
+import { resolveInterbeingTraceId } from "../interbeing/trace_v0_support.ts";
 
 type JsonObject = Record<string, unknown>;
 type JsonSchema = Record<string, unknown>;
@@ -133,7 +134,6 @@ function createDeterministicEventIdSource(): () => string {
 }
 
 async function loadSchemaValidators(interbeingDir: string): Promise<SchemaValidators> {
-  const Ajv2020 = Ajv2020Pkg as unknown as typeof Ajv2020Pkg;
   const ajv = new Ajv2020({ allErrors: true, strict: false });
 
   ajv.addFormat("date-time", {
@@ -285,6 +285,7 @@ export async function runInterbeingE2ELocalV0(
     taskStatuses: "direct_schema",
     eventEnvelope: "direct_schema",
   };
+  const traceId = resolveInterbeingTraceId(parsedEnvelope);
 
   const resultSummary: JsonObject = {
     correlation_id: parsedEnvelope.correlation_id,
@@ -295,6 +296,7 @@ export async function runInterbeingE2ELocalV0(
     requestor: parsedEnvelope.requestor,
     target_node: parsedEnvelope.target_node,
     task_id: parsedEnvelope.task_id,
+    trace_id: traceId,
   };
 
   await Promise.all([
@@ -326,6 +328,7 @@ export async function runInterbeingE2ELocalV0(
     inputSource: loadedInput.inputSource,
     resultRefUri: resultRef.uri,
     statusFlow: lifecycle.statuses.map((entry) => entry.status),
+    traceId,
     validation,
   };
 

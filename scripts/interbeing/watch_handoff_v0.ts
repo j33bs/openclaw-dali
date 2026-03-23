@@ -7,17 +7,22 @@ import {
   isInterbeingLocalDispatchError,
   runInterbeingLocalDispatchV0,
 } from "./local_dispatch_runtime_v0.ts";
+import { resolveInterbeingTraceId } from "./trace_v0_support.ts";
 import {
   WATCHER_TOOL_NAME,
   WATCHER_TOOL_VERSION,
+  WATCHER_HEARTBEAT_INTERVAL_MS,
   appendWatcherLog,
+  createWatcherHeartbeatSessionId,
   ensureWatcherRuntimePaths,
   hashFileContents,
   isPartialTaskEnvelopeFile,
   isTaskEnvelopeFile,
+  inspectWatcherLifecycleSuccessArtifacts,
   listEnvelopeFiles,
   listPartialEnvelopeFiles,
   listRecentWatcherReceipts,
+  listWatcherLogEntries,
   moveIntoDirectory,
   normalizeErrorMessage,
   nowIso,
@@ -30,17 +35,23 @@ import {
   verifyWatcherArtifact,
   waitForStableFile,
   withWatcherMutationLock,
+  writeInterbeingWatcherReport,
+  writeWatcherHeartbeat,
   writeReceiptForMovedFile,
   writeWatcherState,
   type InterbeingWatcherV0Disposition,
   type InterbeingWatcherV0HealthDeps,
   type InterbeingWatcherV0HealthSummary,
   type InterbeingWatcherV0LogEntry,
+  type InterbeingWatcherV0LogQuery,
+  type InterbeingWatcherV0LogQuerySummary,
   type InterbeingWatcherV0Mode,
   type InterbeingWatcherV0Paths,
   type InterbeingWatcherV0ProcessResult,
+  type InterbeingWatcherV0ReceiptFilters,
   type InterbeingWatcherV0ReceiptLocalDispatch,
   type InterbeingWatcherV0ReasonCode,
+  type InterbeingWatcherV0ReportSummary,
   type InterbeingWatcherV0State,
   type InterbeingWatcherV0StatusSummary,
   type InterbeingWatcherV0Summary,
@@ -85,8 +96,30 @@ function resolveLifecycleFailureReasonCode(err: unknown): InterbeingWatcherV0Rea
   return "processing_error";
 }
 
+function resolveWatcherTraceId(params: { fallback: string; rawEnvelope?: unknown }): string {
+  const rawRecord =
+    typeof params.rawEnvelope === "object" && params.rawEnvelope != null
+      ? (params.rawEnvelope as Record<string, unknown>)
+      : null;
+  const correlationId =
+    typeof rawRecord?.correlation_id === "string" && rawRecord.correlation_id.trim().length > 0
+      ? rawRecord.correlation_id.trim()
+      : params.fallback;
+  const payload =
+    typeof rawRecord?.payload === "object" &&
+    rawRecord.payload != null &&
+    !Array.isArray(rawRecord.payload)
+      ? (rawRecord.payload as Record<string, unknown>)
+      : {};
+  return resolveInterbeingTraceId({
+    correlation_id: correlationId,
+    payload,
+  });
+}
+
 function createLogEntry(params: {
   action: InterbeingWatcherV0LogEntry["action"];
+  durationMs?: number | null;
   filename: string;
   finalPath?: string | null;
   paths: InterbeingWatcherV0Paths;
@@ -96,9 +129,11 @@ function createLogEntry(params: {
   sha256?: string | null;
   status: InterbeingWatcherV0LogEntry["status"];
   timestamp?: string;
+  traceId?: string | null;
 }): InterbeingWatcherV0LogEntry {
   return {
     action: params.action,
+    duration_ms: params.durationMs ?? null,
     filename: params.filename,
     final_path: toRepoRelative(params.paths, params.finalPath) ?? null,
     reason_code: params.reasonCode,
@@ -107,9 +142,14 @@ function createLogEntry(params: {
     sha256: params.sha256 ?? null,
     status: params.status,
     timestamp: params.timestamp ?? nowIso(),
+    trace_id: params.traceId ?? null,
     tool_name: WATCHER_TOOL_NAME,
     watcher_version: WATCHER_TOOL_VERSION,
   };
+}
+
+function elapsedSince(startedAtMs: number): number {
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 async function resetLifecycleOutputDir(outputDir: string): Promise<void> {
@@ -157,6 +197,7 @@ async function logIgnoredPartialsInQueue(params: {
 
 async function finalizeMovedOutcome(params: {
   disposition: InterbeingWatcherV0Disposition;
+  durationMs?: number | null;
   filename: string;
   intakePath: string;
   intakeTimestamp: string;
@@ -167,8 +208,10 @@ async function finalizeMovedOutcome(params: {
   sha256?: string | null;
   status: InterbeingWatcherV0LogEntry["status"];
   targetDir: string;
+  traceId?: string | null;
 }): Promise<InterbeingWatcherV0ProcessResult> {
   let finalPath: string | null = null;
+  const resolvedTraceId = params.traceId ?? params.filename;
   try {
     finalPath = await moveIntoDirectory(params.intakePath, params.targetDir);
   } catch (err) {
@@ -176,6 +219,7 @@ async function finalizeMovedOutcome(params: {
       params.paths.logPath,
       createLogEntry({
         action: "intake",
+        durationMs: params.durationMs,
         filename: params.filename,
         finalPath: null,
         paths: params.paths,
@@ -184,6 +228,7 @@ async function finalizeMovedOutcome(params: {
         sha256: params.sha256,
         status: "failed",
         timestamp: params.intakeTimestamp,
+        traceId: resolvedTraceId,
       }),
     );
     return {
@@ -218,6 +263,7 @@ async function finalizeMovedOutcome(params: {
       reason_detail: params.reasonDetail ?? null,
       schema_version: "v0",
       sha256: params.sha256 ?? null,
+      trace_id: resolvedTraceId,
       tool_name: WATCHER_TOOL_NAME,
       watcher_version: WATCHER_TOOL_VERSION,
     });
@@ -225,6 +271,7 @@ async function finalizeMovedOutcome(params: {
       params.paths.logPath,
       createLogEntry({
         action: "intake",
+        durationMs: params.durationMs,
         filename: params.filename,
         finalPath,
         paths: params.paths,
@@ -234,6 +281,7 @@ async function finalizeMovedOutcome(params: {
         sha256: params.sha256,
         status: params.status,
         timestamp: params.intakeTimestamp,
+        traceId: resolvedTraceId,
       }),
     );
     return {
@@ -251,6 +299,7 @@ async function finalizeMovedOutcome(params: {
       params.paths.logPath,
       createLogEntry({
         action: "intake",
+        durationMs: params.durationMs,
         filename: params.filename,
         finalPath,
         paths: params.paths,
@@ -259,6 +308,7 @@ async function finalizeMovedOutcome(params: {
         sha256: params.sha256,
         status: "failed",
         timestamp: params.intakeTimestamp,
+        traceId: resolvedTraceId,
       }),
     );
     return {
@@ -283,6 +333,7 @@ async function processSingleFile(params: {
   const intakePath = path.resolve(params.filePath);
   const filename = path.basename(intakePath);
   const intakeTimestamp = nowIso();
+  const startedAtMs = Date.now();
 
   if (!isTaskEnvelopeFile(intakePath)) {
     return {
@@ -307,12 +358,14 @@ async function processSingleFile(params: {
       params.paths.logPath,
       createLogEntry({
         action: "intake",
+        durationMs: elapsedSince(startedAtMs),
         filename,
         finalPath: intakePath,
         paths: params.paths,
         reasonCode: "file_not_ready",
         status: "skipped",
         timestamp: intakeTimestamp,
+        traceId: filename,
       }),
     );
     return {
@@ -333,6 +386,7 @@ async function processSingleFile(params: {
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -341,6 +395,7 @@ async function processSingleFile(params: {
       reasonDetail: `read_error:${normalizeErrorMessage(err)}`,
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId: filename,
     });
   }
 
@@ -350,6 +405,7 @@ async function processSingleFile(params: {
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -358,14 +414,20 @@ async function processSingleFile(params: {
       reasonDetail: normalizeErrorMessage(err),
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId: filename,
     });
   }
+  const traceId = resolveWatcherTraceId({
+    fallback: filename,
+    rawEnvelope: rawJson,
+  });
 
   const rawRecord =
     typeof rawJson === "object" && rawJson !== null ? (rawJson as Record<string, unknown>) : null;
   if (rawRecord?.schema_version !== "v0") {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -374,6 +436,7 @@ async function processSingleFile(params: {
       reasonDetail: JSON.stringify(rawRecord?.schema_version ?? null),
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId,
     });
   }
 
@@ -382,6 +445,7 @@ async function processSingleFile(params: {
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -390,6 +454,7 @@ async function processSingleFile(params: {
       reasonDetail: normalizeErrorMessage(err),
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId,
     });
   }
 
@@ -399,6 +464,7 @@ async function processSingleFile(params: {
   if (state.processed_hashes[sha256] && !hasOverride) {
     return finalizeMovedOutcome({
       disposition: "skipped",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -408,6 +474,7 @@ async function processSingleFile(params: {
       sha256,
       status: "skipped",
       targetDir: params.paths.processedDir,
+      traceId,
     });
   }
 
@@ -420,9 +487,30 @@ async function processSingleFile(params: {
       outputDir: params.paths.lifecycleOutputDir,
     });
     lifecycleReceiptContext = extractLifecycleReceiptContext(lifecycleResult);
+    const successArtifacts = await inspectWatcherLifecycleSuccessArtifacts(
+      params.paths.lifecycleOutputDir,
+    );
+    if (!successArtifacts.ok) {
+      return finalizeMovedOutcome({
+        disposition: "failed",
+        durationMs: elapsedSince(startedAtMs),
+        filename,
+        intakePath,
+        intakeTimestamp,
+        localDispatch: lifecycleReceiptContext,
+        paths: params.paths,
+        reasonCode: "silent_failure_detected",
+        reasonDetail: successArtifacts.detail,
+        sha256,
+        status: "failed",
+        targetDir: params.paths.failedDir,
+        traceId,
+      });
+    }
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -433,6 +521,7 @@ async function processSingleFile(params: {
       sha256,
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId,
     });
   }
 
@@ -456,6 +545,7 @@ async function processSingleFile(params: {
   } catch (err) {
     return finalizeMovedOutcome({
       disposition: "failed",
+      durationMs: elapsedSince(startedAtMs),
       filename,
       intakePath,
       intakeTimestamp,
@@ -465,11 +555,13 @@ async function processSingleFile(params: {
       sha256,
       status: "failed",
       targetDir: params.paths.failedDir,
+      traceId,
     });
   }
 
   return finalizeMovedOutcome({
     disposition: "processed",
+    durationMs: elapsedSince(startedAtMs),
     filename,
     intakePath,
     intakeTimestamp,
@@ -479,11 +571,13 @@ async function processSingleFile(params: {
     sha256,
     status: "processed",
     targetDir: params.paths.processedDir,
+    traceId,
   });
 }
 
 async function processQueue(params: {
   interbeingDir: string;
+  onOutcome?: (outcome: InterbeingWatcherV0ProcessResult) => void | Promise<void>;
   observedPartials: Set<string>;
   paths: InterbeingWatcherV0Paths;
   phase: "startup" | "watch";
@@ -539,6 +633,9 @@ async function processQueue(params: {
         runLifecycle: params.runLifecycle,
       });
       params.summary[outcome.disposition] += 1;
+      if (params.onOutcome) {
+        await params.onOutcome(outcome);
+      }
     }
   });
 }
@@ -570,14 +667,78 @@ export async function getInterbeingWatcherV0Health(
 }
 
 export async function listInterbeingWatcherV0Items(
-  options: { cwd?: string; limit?: number; paths?: Partial<InterbeingWatcherV0Paths> } = {},
+  options: {
+    cwd?: string;
+    disposition?: InterbeingWatcherV0ReceiptFilters["disposition"];
+    limit?: number;
+    paths?: Partial<InterbeingWatcherV0Paths>;
+    reasonCode?: InterbeingWatcherV0ReceiptFilters["reasonCode"];
+    traceId?: InterbeingWatcherV0ReceiptFilters["traceId"];
+  } = {},
 ): Promise<{ items: unknown[]; tool_name: string; watcher_version: string }> {
   const paths = {
     ...resolveInterbeingWatcherV0Paths(options.cwd),
     ...options.paths,
   };
   await ensureWatcherRuntimePaths(paths);
-  return listRecentWatcherReceipts(paths, options.limit ?? 10);
+  return listRecentWatcherReceipts(paths, options.limit ?? 10, {
+    disposition: options.disposition,
+    reasonCode: options.reasonCode,
+    traceId: options.traceId,
+  });
+}
+
+export async function queryInterbeingWatcherV0Logs(
+  options: {
+    action?: InterbeingWatcherV0LogQuery["action"];
+    cwd?: string;
+    filename?: InterbeingWatcherV0LogQuery["filename"];
+    limit?: InterbeingWatcherV0LogQuery["limit"];
+    paths?: Partial<InterbeingWatcherV0Paths>;
+    reasonCode?: InterbeingWatcherV0LogQuery["reasonCode"];
+    sha256?: InterbeingWatcherV0LogQuery["sha256"];
+    status?: InterbeingWatcherV0LogQuery["status"];
+    traceId?: InterbeingWatcherV0LogQuery["traceId"];
+  } = {},
+): Promise<InterbeingWatcherV0LogQuerySummary> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return listWatcherLogEntries(paths, {
+    action: options.action,
+    filename: options.filename,
+    limit: options.limit,
+    reasonCode: options.reasonCode,
+    sha256: options.sha256,
+    status: options.status,
+    traceId: options.traceId,
+  });
+}
+
+export async function reportInterbeingWatcherV0(
+  options: {
+    cwd?: string;
+    filename?: string;
+    outPath?: string;
+    paths?: Partial<InterbeingWatcherV0Paths>;
+    sha256?: string;
+    traceId?: string;
+  } = {},
+): Promise<InterbeingWatcherV0ReportSummary> {
+  const paths = {
+    ...resolveInterbeingWatcherV0Paths(options.cwd),
+    ...options.paths,
+  };
+  await ensureWatcherRuntimePaths(paths);
+  return writeInterbeingWatcherReport({
+    filename: options.filename,
+    outPath: options.outPath,
+    paths,
+    sha256: options.sha256,
+    traceId: options.traceId,
+  });
 }
 
 export async function verifyInterbeingWatcherV0(
@@ -586,6 +747,7 @@ export async function verifyInterbeingWatcherV0(
     filename?: string;
     paths?: Partial<InterbeingWatcherV0Paths>;
     sha256?: string;
+    traceId?: string;
   } = {},
 ): Promise<InterbeingWatcherV0VerifySummary> {
   const paths = {
@@ -596,14 +758,18 @@ export async function verifyInterbeingWatcherV0(
   return verifyWatcherArtifact(paths, {
     filename: options.filename,
     sha256: options.sha256,
+    traceId: options.traceId,
   });
 }
 
 export async function replayInterbeingWatcherV0(options: {
   cwd?: string;
-  file: string;
+  file?: string;
   forceReprocess?: boolean;
+  filename?: string;
   paths?: Partial<InterbeingWatcherV0Paths>;
+  sha256?: string;
+  traceId?: string;
 }): Promise<ReturnType<typeof queueReplayIntoIncoming> extends Promise<infer T> ? T : never> {
   const paths = {
     ...resolveInterbeingWatcherV0Paths(options.cwd),
@@ -612,9 +778,12 @@ export async function replayInterbeingWatcherV0(options: {
   await ensureWatcherRuntimePaths(paths);
   try {
     return await queueReplayIntoIncoming({
-      filePath: options.file,
+      filePath: options.file ?? "",
       forceReprocess: options.forceReprocess,
+      filename: options.filename,
       paths,
+      sha256: options.sha256,
+      traceId: options.traceId,
     });
   } catch (err) {
     const detail = normalizeErrorMessage(err);
@@ -622,7 +791,10 @@ export async function replayInterbeingWatcherV0(options: {
       paths.logPath,
       createLogEntry({
         action: "replay",
-        filename: path.basename(options.file),
+        filename:
+          options.file != null
+            ? path.basename(options.file)
+            : (options.filename ?? options.traceId ?? options.sha256 ?? "<query>"),
         finalPath: null,
         paths,
         reasonCode: detail.includes("--force-reprocess")
@@ -630,6 +802,7 @@ export async function replayInterbeingWatcherV0(options: {
           : "unexpected_internal_error",
         reasonDetail: detail,
         status: "failed",
+        traceId: path.basename(options.file),
       }),
     );
     throw err;
@@ -654,24 +827,61 @@ export async function runInterbeingWatcherV0(
     failed: 0,
   };
   const observedPartials = new Set<string>();
+  const heartbeatSessionId = createWatcherHeartbeatSessionId();
+  const startedAt = nowIso();
+  let lastProcessedTimestamp: string | null = null;
+  let lastFailedTimestamp: string | null = null;
 
+  const recordOutcome = (outcome: InterbeingWatcherV0ProcessResult): void => {
+    if (outcome.disposition === "processed") {
+      lastProcessedTimestamp = outcome.intakeTimestamp;
+    }
+    if (outcome.disposition === "failed") {
+      lastFailedTimestamp = outcome.intakeTimestamp;
+    }
+  };
+  const flushHeartbeat = async (): Promise<void> => {
+    await writeWatcherHeartbeat(paths.heartbeatPath, {
+      last_failed_timestamp: lastFailedTimestamp,
+      last_processed_timestamp: lastProcessedTimestamp,
+      last_seen_at: nowIso(),
+      mode: options.mode,
+      pid: process.pid,
+      session_id: heartbeatSessionId,
+      started_at: startedAt,
+      totals: {
+        failed: summary.failed,
+        processed: summary.processed,
+        skipped: summary.skipped,
+      },
+    });
+  };
+
+  await flushHeartbeat();
   await processQueue({
     interbeingDir,
+    onOutcome: recordOutcome,
     observedPartials,
     paths,
     phase: "startup",
     runLifecycle,
     summary,
   });
+  await flushHeartbeat();
   if (options.onIdle) {
     await options.onIdle();
   }
   if (options.mode === "once") {
+    await flushHeartbeat();
     return summary;
   }
 
   const pending = new Set<string>();
   let draining = false;
+  const heartbeatTimer = setInterval(() => {
+    void flushHeartbeat();
+  }, WATCHER_HEARTBEAT_INTERVAL_MS);
+  heartbeatTimer.unref?.();
   const drain = async (): Promise<void> => {
     if (draining) {
       return;
@@ -692,8 +902,10 @@ export async function runInterbeingWatcherV0(
             runLifecycle,
           });
           summary[outcome.disposition] += 1;
+          recordOutcome(outcome);
         }
       });
+      await flushHeartbeat();
     } finally {
       draining = false;
       if (options.onIdle) {
@@ -748,12 +960,14 @@ export async function runInterbeingWatcherV0(
   });
   await processQueue({
     interbeingDir,
+    onOutcome: recordOutcome,
     observedPartials,
     paths,
     phase: "startup",
     runLifecycle,
     summary,
   });
+  await flushHeartbeat();
   if (options.onIdle) {
     await options.onIdle();
   }
@@ -771,6 +985,8 @@ export async function runInterbeingWatcherV0(
       process.off("SIGTERM", onSigTerm);
     });
   }).finally(async () => {
+    clearInterval(heartbeatTimer);
+    await flushHeartbeat();
     await watcher.close();
   });
   return summary;

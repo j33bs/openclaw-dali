@@ -3,11 +3,12 @@ import path from "node:path";
 import {
   emitInterbeingTaskV0,
   listInterbeingEmitterV0,
+  listInterbeingEmitterV0LogEntries,
   resolveInterbeingEmitterV0Paths,
   verifyInterbeingEmitterV0,
 } from "./emitter_v0_support.ts";
 
-type Command = "emit" | "list" | "status" | "verify";
+type Command = "emit" | "list" | "logs" | "status" | "verify";
 
 type EmitArgs = {
   deliverDir?: string;
@@ -20,6 +21,7 @@ type EmitArgs = {
   correlationId?: string;
   createdAt?: string;
   allowDuplicate?: boolean;
+  traceId?: string;
 };
 
 function parseFlag(argv: string[], name: string): string | undefined {
@@ -70,6 +72,7 @@ async function runEmit(argv: string[]): Promise<void> {
     requestor: parseFlag(argv, "--requestor"),
     targetNode: parseFlag(argv, "--target-node"),
     taskId: parseFlag(argv, "--task-id"),
+    traceId: parseFlag(argv, "--trace-id"),
   };
 
   const envelope = {
@@ -87,10 +90,12 @@ async function runEmit(argv: string[]): Promise<void> {
     allowDuplicate: args.allowDuplicate,
     deliverDir: args.deliverDir,
     filename: args.filename,
+    traceId: args.traceId,
   });
   console.log(
     JSON.stringify(
       {
+        delivery_receipt: result.deliveryReceipt,
         duplicate: result.duplicate,
         delivered_to: result.deliveredTo,
         filename: result.filename,
@@ -99,6 +104,7 @@ async function runEmit(argv: string[]): Promise<void> {
         sha256: result.sha256,
         target_node: result.envelope.target_node,
         task_id: result.envelope.task_id,
+        trace_id: result.traceId,
       },
       null,
       2,
@@ -108,7 +114,9 @@ async function runEmit(argv: string[]): Promise<void> {
 
 async function runList(argv: string[]): Promise<void> {
   const limit = Number.parseInt(parseFlag(argv, "--limit") ?? "10", 10);
-  const items = await listInterbeingEmitterV0(process.cwd(), Number.isFinite(limit) ? limit : 10);
+  const items = await listInterbeingEmitterV0(process.cwd(), Number.isFinite(limit) ? limit : 10, {
+    traceId: parseFlag(argv, "--trace-id"),
+  });
   console.log(JSON.stringify({ items }, null, 2));
 }
 
@@ -135,13 +143,26 @@ async function runStatus(): Promise<void> {
   );
 }
 
+async function runLogs(argv: string[]): Promise<void> {
+  const limit = Number.parseInt(parseFlag(argv, "--limit") ?? "50", 10);
+  const items = await listInterbeingEmitterV0LogEntries(process.cwd(), {
+    action: parseFlag(argv, "--action") as "duplicate_emit" | "emit" | undefined,
+    filename: parseFlag(argv, "--filename"),
+    limit: Number.isFinite(limit) ? limit : 50,
+    sha256: parseFlag(argv, "--sha256"),
+    traceId: parseFlag(argv, "--trace-id"),
+  });
+  console.log(JSON.stringify(items, null, 2));
+}
+
 async function runVerify(argv: string[]): Promise<void> {
   const filename = parseFlag(argv, "--filename");
   const sha256 = parseFlag(argv, "--sha256");
-  if (!filename && !sha256) {
-    throw new Error("verify requires --filename or --sha256");
+  const traceId = parseFlag(argv, "--trace-id");
+  if (!filename && !sha256 && !traceId) {
+    throw new Error("verify requires --filename, --sha256, or --trace-id");
   }
-  const match = await verifyInterbeingEmitterV0(process.cwd(), { filename, sha256 });
+  const match = await verifyInterbeingEmitterV0(process.cwd(), { filename, sha256, traceId });
   console.log(JSON.stringify({ match }, null, 2));
 }
 
@@ -149,7 +170,7 @@ async function main(): Promise<void> {
   const [commandRaw, ...rest] = process.argv.slice(2);
   const command = commandRaw as Command | undefined;
   if (!command) {
-    throw new Error("expected command: emit | list | status | verify");
+    throw new Error("expected command: emit | list | logs | status | verify");
   }
   if (command === "emit") {
     await runEmit(rest);
@@ -161,6 +182,10 @@ async function main(): Promise<void> {
   }
   if (command === "status") {
     await runStatus();
+    return;
+  }
+  if (command === "logs") {
+    await runLogs(rest);
     return;
   }
   if (command === "verify") {

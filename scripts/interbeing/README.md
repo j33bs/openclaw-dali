@@ -15,11 +15,21 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts health`
   Prints service, lock, queue, state, and recent failure diagnostics as machine-readable JSON.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts list --limit 10`
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts list --limit 10 --disposition failed --reason-code schema_invalid --trace-id <trace>`
   Lists recent processed, failed, and skipped receipts.
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts logs --limit 50`
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts logs --trace-id <trace>`
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts logs --filename <name> --status failed --action intake`
+  Queries normalized watcher log entries, including per-envelope `duration_ms`, without grepping JSONL by hand.
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts report --trace-id <trace>`
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts report --filename <name> --out workspace/audit/custom/report.json`
+  Captures a reproducible failure or trace report with status, health, receipts, verify matches, log entries, and input envelope contents.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts verify --filename <name>`
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts verify --sha256 <hash>`
-  Verifies current or historical intake state by filename or payload hash.
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts verify --trace-id <trace>`
+  Verifies current or historical intake state by filename, payload hash, or shared trace ID.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts replay --file handoff/failed/dali/<file>`
+- `pnpm tsx scripts/interbeing/run_watcher_v0.ts replay --trace-id <trace>`
   Copies a failed artifact back into intake.
 - `pnpm tsx scripts/interbeing/run_watcher_v0.ts replay --file handoff/processed/dali/<file> --force-reprocess`
   Explicitly overrides idempotency once for a known processed hash.
@@ -32,14 +42,21 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts emit --requestor dali --target-node c_lawd --task-id task-001 --correlation-id corr-001 --payload-json '{"intent":"notify","message":"hello"}'`
   Emits a canonical `submit_task` envelope into `handoff/outgoing/<target>/` with an adjacent receipt and emitter state/log updates.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts emit ... --trace-id trace-demo-001`
+  Overrides the default trace ID when you need to join this emission to an existing operator-visible trace.
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts emit ... --deliver-dir /path/to/bridge/incoming/c_lawd`
   Also copies the emitted envelope into an external bridge/inbox directory when you have a proven handoff path.
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts list --limit 10`
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts list --limit 10 --trace-id <trace>`
   Lists recent outbound emissions.
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts logs --limit 50`
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts logs --trace-id <trace>`
+  Queries normalized emitter log entries, including duplicate emission attempts.
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts status`
   Prints a machine-readable summary of the emitter roots and recent emitted counts by target node.
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts verify --filename <name>`
 - `pnpm tsx scripts/interbeing/run_emitter_v0.ts verify --sha256 <hash>`
+- `pnpm tsx scripts/interbeing/run_emitter_v0.ts verify --trace-id <trace>`
   Verifies that a previously emitted envelope still exists in the outbound queue and returns its receipt path.
 
 ## Local Paths
@@ -50,6 +67,7 @@ Local Dali intake watcher for file-based Interbeing v0 handoff.
 - processed: `handoff/processed/dali/`
 - failed: `handoff/failed/dali/`
 - state: `workspace/state/interbeing_watcher_v0.json`
+- heartbeat: `workspace/state/interbeing_watcher_v0.heartbeat.json`
 - mutation lock: `workspace/state/interbeing_watcher_v0.lock`
 - log: `workspace/audit/interbeing_watcher_v0.log`
 - lifecycle output: `workspace/audit/interbeing-watcher-v0/last-run/`
@@ -67,6 +85,9 @@ directory and point the terminal `task-status-succeeded.json` `result_ref.uri`
 at that file. For the plain local harness this is `result-summary.json`; for
 local-dispatch flows it remains `dispatch-summary.json`.
 
+Those success artifacts now also carry the shared `trace_id` so emitter, watcher,
+and lifecycle outputs can be stitched together without relying on hashes alone.
+
 ## Receipts
 
 Every moved processed, failed, or skipped artifact gets an adjacent receipt:
@@ -80,10 +101,19 @@ Receipt fields include:
 - final disposition
 - reason code
 - sha256
+- trace_id
 - watcher tool name and local watcher version
 - references to local evidence paths when available
 
 Original envelope contents are never modified.
+
+Emitter receipts also include:
+
+- `trace_id`
+- `delivery_receipt.status` (`queued_only` or `accepted`)
+- `delivery_receipt.accepted_at`
+- `delivery_receipt.deliver_dir`
+- `delivery_receipt.delivered_to`
 
 ## Service Mode
 
@@ -119,9 +149,13 @@ Notes:
 - Replay and `--force-reprocess` remain valid while the service is running; queue mutation is serialized through `workspace/state/interbeing_watcher_v0.lock` so state updates are not clobbered by the long-running watcher.
 - The lock file is crash-recoverable. A dead owner PID is cleared automatically, and a live PID is only treated as stale when it is clearly not a watcher process. Anything ambiguous remains fail-closed and operator-visible through `health`.
 - `status`, `list`, and `verify` stay read-only and can be run while the service is active.
+- `logs` is also read-only while the service is active. `report` writes a JSON capture under `workspace/audit/interbeing-watcher-v0/reports/` unless `--out` overrides it.
 - `health` is the fastest operator diagnostic. It reports the installed unit path, service state, restart count, watched paths, queue depth, lock state, state-file readability, last processed or failed timestamps, and recent journal or watcher-log failures.
+- `health` now also reports watcher heartbeat freshness, uptime, recent-window failure rate, and anomaly summaries such as `heartbeat_stale`, `failure_burst`, and `task_volume_spike`.
+- `health` now also includes watcher latency summaries from the log (`avg_ms`, `max_ms`, `p95_ms`) and raises a `slow_processing` warning when recent intake processing crosses the local threshold.
 - `health` only surfaces journal warnings and watcher-log failures with timestamps from the last 12 hours, so stale historical noise does not keep the service in a warning state after recovery.
 - `health` also suppresses replayed failures once the same filename has a later processed receipt, so successful recovery clears the active-failure count without waiting for the 12-hour window to expire.
+- Successful lifecycle runs are now validated against their terminal artifacts. If a custom runner returns without writing `task-status-succeeded.json` plus `result-summary.json` or `dispatch-summary.json`, the watcher fails the envelope closed as `silent_failure_detected` instead of treating it as a success.
 
 ## Failure Taxonomy
 
@@ -137,6 +171,7 @@ Stable local reason codes:
 - `schema_invalid`
 - `schema_version_invalid`
 - `processing_error`
+- `silent_failure_detected`
 - `reviewer_rejected`
 - `move_error`
 - `state_error`
@@ -201,8 +236,10 @@ Receipt notes:
 2. Run `status` to confirm queue and health.
 3. Inspect `handoff/processed/dali/` or `handoff/failed/dali/`.
 4. Read the adjacent `*.receipt.json`.
-5. Use `verify` for remote-friendly confirmation by filename or hash.
-6. Use `replay` for failed artifacts, or `--force-reprocess` for explicit processed-hash overrides.
+5. Use `verify` for remote-friendly confirmation by filename, hash, or trace ID.
+6. Use `logs` when you need the normalized event stream for a specific filename, hash, or trace ID.
+7. Use `report` to capture a reproducible JSON bundle before retrying or escalating.
+8. Use `replay` for failed artifacts, or `--force-reprocess` for explicit processed-hash overrides.
 
 ## Non-Scope
 

@@ -10,6 +10,7 @@ import {
   runInterbeingE2ELocalV0,
   type InterbeingE2ERunOptions,
 } from "../dev/interbeing-e2e-local-v0.ts";
+import { resolveInterbeingTraceId } from "./trace_v0_support.ts";
 import type {
   InterbeingWatcherV0LocalDispatchRole,
   InterbeingWatcherV0ReceiptLineage,
@@ -801,6 +802,7 @@ async function executePlannerRole(params: {
   envelope: InterbeingTaskEnvelopeV0;
   spec: NormalizedLocalDispatchSpec;
 }): Promise<InterbeingLocalDispatchRunResult> {
+  const traceId = resolveInterbeingTraceId(params.envelope);
   const receiptContext = createBaseReceiptContext({
     lineage: params.spec.lineage,
     role: "planner",
@@ -933,6 +935,7 @@ async function executePlannerRole(params: {
           outcome: "reviewer_rejected",
           role: "planner",
           task_id: params.envelope.task_id,
+          trace_id: traceId,
           worker_pool: rejectedContext.worker_pool,
         },
       });
@@ -964,6 +967,7 @@ async function executePlannerRole(params: {
       outcome: "succeeded",
       role: "planner",
       task_id: params.envelope.task_id,
+      trace_id: traceId,
       worker_pool: nextReceiptContext.worker_pool,
     },
   };
@@ -973,6 +977,7 @@ async function executeRootRole(params: {
   envelope: InterbeingTaskEnvelopeV0;
   spec: NormalizedLocalDispatchSpec;
 }): Promise<InterbeingLocalDispatchRunResult> {
+  const traceId = resolveInterbeingTraceId(params.envelope);
   if (params.spec.role === "planner") {
     return executePlannerRole(params);
   }
@@ -1000,6 +1005,7 @@ async function executeRootRole(params: {
         output,
         role: "executor",
         task_id: params.envelope.task_id,
+        trace_id: traceId,
       },
     };
   }
@@ -1030,6 +1036,7 @@ async function executeRootRole(params: {
         output: reviewer.output,
         role: "reviewer",
         task_id: params.envelope.task_id,
+        trace_id: traceId,
       },
     });
   }
@@ -1042,6 +1049,7 @@ async function executeRootRole(params: {
       output: reviewer.output,
       role: "reviewer",
       task_id: params.envelope.task_id,
+      trace_id: traceId,
     },
   };
 }
@@ -1059,6 +1067,7 @@ function buildFailureSummary(params: {
       reason_code: params.error.reasonCode,
       role: params.roleLabel,
       task_id: params.envelope.task_id,
+      trace_id: resolveInterbeingTraceId(params.envelope),
     }
   );
 }

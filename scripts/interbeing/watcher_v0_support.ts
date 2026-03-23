@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -12,6 +12,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseSubmitTaskEnvelopeV0 } from "../../src/shared/interbeing-task-lifecycle-v0.ts";
+import { resolveInterbeingTraceId } from "./trace_v0_support.ts";
 
 export const WATCHER_TOOL_NAME = "interbeing-watcher-v0";
 export const WATCHER_TOOL_VERSION = "v0-hardening";
@@ -23,15 +26,29 @@ export const WATCHER_TEMP_EXTENSION = ".partial";
 export const WATCHER_STATE_FILENAME = "interbeing_watcher_v0.json";
 export const WATCHER_LOG_FILENAME = "interbeing_watcher_v0.log";
 export const WATCHER_LOCK_FILENAME = "interbeing_watcher_v0.lock";
+export const WATCHER_HEARTBEAT_FILENAME = "interbeing_watcher_v0.heartbeat.json";
 export const WATCHER_SYSTEMD_SERVICE_NAME = "openclaw-interbeing-watcher";
 export const WATCHER_LOCK_STALE_AGE_MS = 60_000;
+export const WATCHER_HEARTBEAT_INTERVAL_MS = 15_000;
+export const WATCHER_HEARTBEAT_STALE_AGE_MS = WATCHER_HEARTBEAT_INTERVAL_MS * 3;
 export const WATCHER_HEALTH_ISSUE_MAX_AGE_MS = 12 * 60 * 60 * 1_000;
+export const WATCHER_HEALTH_RECENT_WINDOW_MS = 60 * 60 * 1_000;
+export const WATCHER_FAILURE_BURST_THRESHOLD = 3;
+export const WATCHER_TASK_VOLUME_THRESHOLD = 20;
+export const WATCHER_SLOW_PROCESSING_THRESHOLD_MS = 2_000;
+export const WATCHER_SUCCESS_STATUS_FILENAME = "task-status-succeeded.json";
+export const WATCHER_SUCCESS_SUMMARY_FILENAMES = [
+  "dispatch-summary.json",
+  "result-summary.json",
+] as const;
 export const WATCHER_AVAILABLE_MODES = [
   "once",
   "start",
   "status",
   "health",
   "list",
+  "logs",
+  "report",
   "verify",
   "replay",
 ] as const;
@@ -50,6 +67,7 @@ export type InterbeingWatcherV0ReasonCode =
   | "partial_ignored"
   | "processed"
   | "processing_error"
+  | "silent_failure_detected"
   | "replay_requested"
   | "reviewer_rejected"
   | "force_reprocess_requested"
@@ -103,6 +121,7 @@ export type InterbeingWatcherV0ReceiptLocalDispatch = {
 export type InterbeingWatcherV0Paths = {
   failedDir: string;
   handoffRoot: string;
+  heartbeatPath: string;
   incomingDir: string;
   lifecycleOutputDir: string;
   logPath: string;
@@ -130,6 +149,7 @@ export type InterbeingWatcherV0State = {
 
 export type InterbeingWatcherV0LogEntry = {
   action: InterbeingWatcherV0Action;
+  duration_ms: number | null;
   filename: string;
   final_path: string | null;
   reason_code: InterbeingWatcherV0ReasonCode;
@@ -138,6 +158,7 @@ export type InterbeingWatcherV0LogEntry = {
   sha256: string | null;
   status: InterbeingWatcherV0LogStatus;
   timestamp: string;
+  trace_id: string | null;
   tool_name: string;
   watcher_version: string;
 };
@@ -159,6 +180,7 @@ export type InterbeingWatcherV0Receipt = {
   receipt_path: string;
   schema_version: "v0";
   sha256: string | null;
+  trace_id: string;
   tool_name: string;
   watcher_version: string;
 };
@@ -195,6 +217,7 @@ export type InterbeingWatcherV0StatusSummary = {
   };
   last_failed_timestamp: string | null;
   last_processed_timestamp: string | null;
+  heartbeat_path: string;
   log_path: string;
   paths: {
     failed: string;
@@ -257,17 +280,89 @@ export type InterbeingWatcherV0JournalSummary = {
   warnings: InterbeingWatcherV0JournalIssueSummary[];
 };
 
+export type InterbeingWatcherV0HeartbeatRecord = {
+  last_failed_timestamp: string | null;
+  last_processed_timestamp: string | null;
+  last_seen_at: string;
+  mode: InterbeingWatcherV0Mode;
+  pid: number;
+  session_id: string;
+  started_at: string;
+  totals: {
+    failed: number;
+    processed: number;
+    skipped: number;
+  };
+};
+
+export type InterbeingWatcherV0HeartbeatSummary = {
+  age_seconds: number | null;
+  available: boolean;
+  detail: string | null;
+  last_failed_timestamp: string | null;
+  last_processed_timestamp: string | null;
+  last_seen_at: string | null;
+  mode: InterbeingWatcherV0Mode | null;
+  path: string;
+  pid: number | null;
+  session_id: string | null;
+  started_at: string | null;
+  status: "absent" | "fresh" | "invalid" | "stale";
+  totals: {
+    failed: number;
+    processed: number;
+    skipped: number;
+  };
+  uptime_seconds: number | null;
+};
+
+export type InterbeingWatcherV0MetricsSummary = {
+  latency: {
+    lifetime: InterbeingWatcherV0LatencySummary;
+    recent_window: InterbeingWatcherV0LatencySummary;
+  };
+  lifetime: {
+    failed: number;
+    processed: number;
+    skipped: number;
+  };
+  recent_window: {
+    error_rate: number;
+    failed: number;
+    minutes: number;
+    processed: number;
+    skipped: number;
+    total: number;
+  };
+};
+
+export type InterbeingWatcherV0LatencySummary = {
+  avg_ms: number;
+  count: number;
+  max_ms: number;
+  p95_ms: number;
+};
+
+export type InterbeingWatcherV0Anomaly = {
+  code: string;
+  detail: string;
+  severity: "error" | "warning";
+};
+
 export type InterbeingWatcherV0RecentLogIssueSummary = {
   action: InterbeingWatcherV0Action;
+  duration_ms: number | null;
   filename: string;
   reason_code: InterbeingWatcherV0ReasonCode;
   reason_detail: string | null;
   status: InterbeingWatcherV0LogStatus;
   timestamp: string;
+  trace_id?: string | null;
 };
 
 export type InterbeingWatcherV0HealthSummary = {
   health: {
+    anomalies: InterbeingWatcherV0Anomaly[];
     issues: string[];
     status: "error" | "ok" | "warning";
   };
@@ -275,7 +370,9 @@ export type InterbeingWatcherV0HealthSummary = {
   service: InterbeingWatcherV0ServiceRuntimeSummary;
   tool_name: string;
   watcher: InterbeingWatcherV0StatusSummary & {
+    heartbeat: InterbeingWatcherV0HeartbeatSummary;
     lock: InterbeingWatcherV0LockSummary;
+    metrics: InterbeingWatcherV0MetricsSummary;
     recent_failures: InterbeingWatcherV0RecentLogIssueSummary[];
   };
   watcher_version: string;
@@ -306,7 +403,39 @@ export type InterbeingWatcherV0VerifyMatch = {
   reason_code: InterbeingWatcherV0ReasonCode | null;
   receipt_path: string | null;
   sha256: string | null;
+  trace_id: string | null;
   tracked_hash: boolean;
+};
+
+export type InterbeingWatcherV0ReceiptFilters = {
+  disposition?: InterbeingWatcherV0Disposition;
+  reasonCode?: InterbeingWatcherV0ReasonCode;
+  traceId?: string;
+};
+
+export type InterbeingWatcherV0LogQuery = {
+  action?: InterbeingWatcherV0Action;
+  filename?: string;
+  limit?: number;
+  reasonCode?: InterbeingWatcherV0ReasonCode;
+  sha256?: string;
+  status?: InterbeingWatcherV0LogStatus;
+  traceId?: string;
+};
+
+export type InterbeingWatcherV0LogQuerySummary = {
+  items: InterbeingWatcherV0LogEntry[];
+  query: {
+    action: InterbeingWatcherV0Action | null;
+    filename: string | null;
+    limit: number;
+    reason_code: InterbeingWatcherV0ReasonCode | null;
+    sha256: string | null;
+    status: InterbeingWatcherV0LogStatus | null;
+    trace_id: string | null;
+  };
+  tool_name: string;
+  watcher_version: string;
 };
 
 export type InterbeingWatcherV0VerifySummary = {
@@ -315,6 +444,7 @@ export type InterbeingWatcherV0VerifySummary = {
   query: {
     filename: string | null;
     sha256: string | null;
+    trace_id: string | null;
   };
   tool_name: string;
   watcher_version: string;
@@ -324,10 +454,49 @@ export type InterbeingWatcherV0ReplaySummary = {
   force_reprocess: boolean;
   queued_path: string;
   reason_code: InterbeingWatcherV0ReasonCode;
+  selected_source: {
+    disposition: InterbeingWatcherV0Disposition;
+    file: string;
+    intake_timestamp: string | null;
+    trace_id: string | null;
+  } | null;
   sha256: string;
   source_file: string;
+  trace_id: string | null;
   tool_name: string;
   watcher_version: string;
+};
+
+export type InterbeingWatcherV0ReportSummary = {
+  environment: {
+    arch: string;
+    cwd: string;
+    node_version: string;
+    platform: NodeJS.Platform;
+  };
+  generated_at: string;
+  health: InterbeingWatcherV0HealthSummary;
+  input_envelopes: Array<{
+    contents: unknown;
+    exists: boolean;
+    path: string;
+  }>;
+  log_entries: InterbeingWatcherV0LogEntry[];
+  matches: InterbeingWatcherV0VerifyMatch[];
+  output_path: string;
+  query: InterbeingWatcherV0VerifySummary["query"];
+  receipts: InterbeingWatcherV0Receipt[];
+  status: InterbeingWatcherV0StatusSummary;
+  tool_name: string;
+  watcher_version: string;
+};
+
+export type InterbeingWatcherV0LifecycleSuccessArtifacts = {
+  detail: string | null;
+  ok: boolean;
+  result_ref_path: string | null;
+  status_path: string;
+  summary_path: string | null;
 };
 
 type CandidateReceipt = Omit<InterbeingWatcherV0Receipt, "final_path" | "receipt_path">;
@@ -391,6 +560,33 @@ export function buildReceiptPath(filePath: string): string {
     : `${filePath}${WATCHER_RECEIPT_SUFFIX}`;
 }
 
+function slugifyFragment(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
+function asJsonRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value != null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function resolveResultRefPath(uri: string): string | null {
+  try {
+    const parsed = new URL(uri);
+    if (parsed.protocol !== "file:") {
+      return null;
+    }
+    return path.resolve(fileURLToPath(parsed));
+  } catch {
+    return null;
+  }
+}
+
 export function isTaskEnvelopeFile(filePath: string): boolean {
   const baseName = path.basename(filePath);
   return baseName.endsWith(WATCHER_TASK_PATTERN) && !baseName.endsWith(WATCHER_TEMP_EXTENSION);
@@ -405,6 +601,7 @@ export function resolveInterbeingWatcherV0Paths(cwd = process.cwd()): Interbeing
   const handoffRoot = path.join(repoRoot, "handoff");
   return {
     handoffRoot,
+    heartbeatPath: path.join(repoRoot, "workspace", "state", WATCHER_HEARTBEAT_FILENAME),
     incomingDir: path.join(handoffRoot, "incoming", "dali"),
     processedDir: path.join(handoffRoot, "processed", "dali"),
     failedDir: path.join(handoffRoot, "failed", "dali"),
@@ -465,6 +662,77 @@ export async function ensureWatcherRuntimePaths(paths: InterbeingWatcherV0Paths)
     mkdir(path.dirname(paths.logPath), { recursive: true }),
     mkdir(paths.lifecycleOutputDir, { recursive: true }),
   ]);
+}
+
+export function createWatcherHeartbeatSessionId(): string {
+  return `watcher-${randomUUID()}`;
+}
+
+export async function writeWatcherHeartbeat(
+  heartbeatPath: string,
+  heartbeat: InterbeingWatcherV0HeartbeatRecord,
+): Promise<void> {
+  const tempPath = `${heartbeatPath}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(tempPath, `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+  await rename(tempPath, heartbeatPath);
+}
+
+export async function readWatcherHeartbeat(
+  heartbeatPath: string,
+): Promise<InterbeingWatcherV0HeartbeatRecord | null> {
+  if (!(await pathExists(heartbeatPath))) {
+    return null;
+  }
+  const raw = JSON.parse(
+    await readFile(heartbeatPath, "utf8"),
+  ) as Partial<InterbeingWatcherV0HeartbeatRecord>;
+  if (
+    (raw.mode !== "once" && raw.mode !== "start") ||
+    typeof raw.last_seen_at !== "string" ||
+    typeof raw.session_id !== "string" ||
+    typeof raw.started_at !== "string" ||
+    typeof raw.pid !== "number" ||
+    typeof raw.totals !== "object" ||
+    raw.totals == null
+  ) {
+    throw new Error(`invalid watcher heartbeat schema in ${heartbeatPath}`);
+  }
+  return {
+    last_failed_timestamp:
+      typeof raw.last_failed_timestamp === "string" ? raw.last_failed_timestamp : null,
+    last_processed_timestamp:
+      typeof raw.last_processed_timestamp === "string" ? raw.last_processed_timestamp : null,
+    last_seen_at: raw.last_seen_at,
+    mode: raw.mode,
+    pid: raw.pid,
+    session_id: raw.session_id,
+    started_at: raw.started_at,
+    totals: {
+      failed:
+        typeof raw.totals.failed === "number" && Number.isFinite(raw.totals.failed)
+          ? raw.totals.failed
+          : 0,
+      processed:
+        typeof raw.totals.processed === "number" && Number.isFinite(raw.totals.processed)
+          ? raw.totals.processed
+          : 0,
+      skipped:
+        typeof raw.totals.skipped === "number" && Number.isFinite(raw.totals.skipped)
+          ? raw.totals.skipped
+          : 0,
+    },
+  };
+}
+
+function secondsSince(timestamp: string | null, nowMs: number): number | null {
+  if (timestamp == null) {
+    return null;
+  }
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.max(0, Math.floor((nowMs - parsed) / 1_000));
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -870,6 +1138,140 @@ export async function readWatcherReceipt(receiptPath: string): Promise<Interbein
   return JSON.parse(await readFile(receiptPath, "utf8")) as InterbeingWatcherV0Receipt;
 }
 
+async function readLifecycleArtifactRecord(filePath: string): Promise<Record<string, unknown>> {
+  const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+  const record = asJsonRecord(parsed);
+  if (record == null) {
+    throw new Error(`${path.basename(filePath)} is not a JSON object`);
+  }
+  return record;
+}
+
+export async function inspectWatcherLifecycleSuccessArtifacts(
+  outputDir: string,
+): Promise<InterbeingWatcherV0LifecycleSuccessArtifacts> {
+  const statusPath = path.join(outputDir, WATCHER_SUCCESS_STATUS_FILENAME);
+  if (!(await pathExists(statusPath))) {
+    return {
+      detail: `missing ${WATCHER_SUCCESS_STATUS_FILENAME}`,
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: null,
+    };
+  }
+
+  let statusRecord: Record<string, unknown>;
+  try {
+    statusRecord = await readLifecycleArtifactRecord(statusPath);
+  } catch (err) {
+    return {
+      detail: normalizeErrorMessage(err),
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: null,
+    };
+  }
+  if (statusRecord.status !== "succeeded") {
+    return {
+      detail: `${WATCHER_SUCCESS_STATUS_FILENAME} did not record status=succeeded`,
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: null,
+    };
+  }
+
+  let summaryPath: string | null = null;
+  for (const filename of WATCHER_SUCCESS_SUMMARY_FILENAMES) {
+    const candidate = path.join(outputDir, filename);
+    if (await pathExists(candidate)) {
+      summaryPath = candidate;
+      break;
+    }
+  }
+  if (summaryPath == null) {
+    return {
+      detail: `missing ${WATCHER_SUCCESS_SUMMARY_FILENAMES.join(" or ")}`,
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: null,
+    };
+  }
+
+  try {
+    const summaryRecord = await readLifecycleArtifactRecord(summaryPath);
+    if (summaryRecord.outcome != null && summaryRecord.outcome !== "succeeded") {
+      return {
+        detail: `${path.basename(summaryPath)} did not record outcome=succeeded`,
+        ok: false,
+        result_ref_path: null,
+        status_path: statusPath,
+        summary_path: summaryPath,
+      };
+    }
+  } catch (err) {
+    return {
+      detail: normalizeErrorMessage(err),
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: summaryPath,
+    };
+  }
+
+  const resultRef = asJsonRecord(statusRecord.result_ref);
+  const resultRefUri = typeof resultRef?.uri === "string" ? resultRef.uri : null;
+  if (resultRefUri == null) {
+    return {
+      detail: `${WATCHER_SUCCESS_STATUS_FILENAME} is missing result_ref.uri`,
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: summaryPath,
+    };
+  }
+
+  const resultRefPath = resolveResultRefPath(resultRefUri);
+  if (resultRefPath == null) {
+    return {
+      detail: `${WATCHER_SUCCESS_STATUS_FILENAME} result_ref.uri is not a file:// URI`,
+      ok: false,
+      result_ref_path: null,
+      status_path: statusPath,
+      summary_path: summaryPath,
+    };
+  }
+  if (!(await pathExists(resultRefPath))) {
+    return {
+      detail: `${WATCHER_SUCCESS_STATUS_FILENAME} result_ref.uri points to a missing file`,
+      ok: false,
+      result_ref_path: resultRefPath,
+      status_path: statusPath,
+      summary_path: summaryPath,
+    };
+  }
+  if (path.resolve(summaryPath) !== path.resolve(resultRefPath)) {
+    return {
+      detail: `${WATCHER_SUCCESS_STATUS_FILENAME} result_ref.uri does not match ${path.basename(summaryPath)}`,
+      ok: false,
+      result_ref_path: resultRefPath,
+      status_path: statusPath,
+      summary_path: summaryPath,
+    };
+  }
+
+  return {
+    detail: null,
+    ok: true,
+    result_ref_path: resultRefPath,
+    status_path: statusPath,
+    summary_path: summaryPath,
+  };
+}
+
 export async function listEnvelopeFiles(dirPath: string): Promise<string[]> {
   if (!(await pathExists(dirPath))) {
     return [];
@@ -1088,28 +1490,324 @@ async function readWatcherJournalIssues(
   };
 }
 
+function emptyHeartbeatTotals(): InterbeingWatcherV0HeartbeatSummary["totals"] {
+  return {
+    failed: 0,
+    processed: 0,
+    skipped: 0,
+  };
+}
+
+export async function inspectWatcherHeartbeat(
+  paths: InterbeingWatcherV0Paths,
+  nowMs = Date.now(),
+): Promise<InterbeingWatcherV0HeartbeatSummary> {
+  const heartbeatPath = paths.heartbeatPath;
+  const relativePath = toRepoRelative(paths, heartbeatPath) ?? heartbeatPath;
+  if (!(await pathExists(heartbeatPath))) {
+    return {
+      age_seconds: null,
+      available: false,
+      detail: null,
+      last_failed_timestamp: null,
+      last_processed_timestamp: null,
+      last_seen_at: null,
+      mode: null,
+      path: relativePath,
+      pid: null,
+      session_id: null,
+      started_at: null,
+      status: "absent",
+      totals: emptyHeartbeatTotals(),
+      uptime_seconds: null,
+    };
+  }
+
+  let heartbeat: InterbeingWatcherV0HeartbeatRecord | null = null;
+  try {
+    heartbeat = await readWatcherHeartbeat(heartbeatPath);
+  } catch (err) {
+    return {
+      age_seconds: null,
+      available: false,
+      detail: normalizeErrorMessage(err),
+      last_failed_timestamp: null,
+      last_processed_timestamp: null,
+      last_seen_at: null,
+      mode: null,
+      path: relativePath,
+      pid: null,
+      session_id: null,
+      started_at: null,
+      status: "invalid",
+      totals: emptyHeartbeatTotals(),
+      uptime_seconds: null,
+    };
+  }
+
+  if (heartbeat == null) {
+    return {
+      age_seconds: null,
+      available: false,
+      detail: null,
+      last_failed_timestamp: null,
+      last_processed_timestamp: null,
+      last_seen_at: null,
+      mode: null,
+      path: relativePath,
+      pid: null,
+      session_id: null,
+      started_at: null,
+      status: "absent",
+      totals: emptyHeartbeatTotals(),
+      uptime_seconds: null,
+    };
+  }
+
+  const ageSeconds = secondsSince(heartbeat.last_seen_at, nowMs);
+  const uptimeSeconds = secondsSince(heartbeat.started_at, nowMs);
+  return {
+    age_seconds: ageSeconds,
+    available: true,
+    detail: null,
+    last_failed_timestamp: heartbeat.last_failed_timestamp,
+    last_processed_timestamp: heartbeat.last_processed_timestamp,
+    last_seen_at: heartbeat.last_seen_at,
+    mode: heartbeat.mode,
+    path: relativePath,
+    pid: heartbeat.pid,
+    session_id: heartbeat.session_id,
+    started_at: heartbeat.started_at,
+    status:
+      ageSeconds != null && ageSeconds * 1_000 > WATCHER_HEARTBEAT_STALE_AGE_MS ? "stale" : "fresh",
+    totals: heartbeat.totals,
+    uptime_seconds: uptimeSeconds,
+  };
+}
+
+async function readWatcherLogEntries(
+  logPath: string,
+): Promise<Array<Partial<InterbeingWatcherV0LogEntry>>> {
+  if (!(await pathExists(logPath))) {
+    return [];
+  }
+  const raw = await readFile(logPath, "utf8");
+  const entries: Array<Partial<InterbeingWatcherV0LogEntry>> = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    try {
+      entries.push(JSON.parse(trimmed) as Partial<InterbeingWatcherV0LogEntry>);
+    } catch {
+      continue;
+    }
+  }
+  return entries;
+}
+
+function normalizeWatcherLogEntry(
+  entry: Partial<InterbeingWatcherV0LogEntry>,
+  paths: InterbeingWatcherV0Paths,
+): InterbeingWatcherV0LogEntry | null {
+  if (
+    (entry.action !== "intake" && entry.action !== "replay") ||
+    typeof entry.filename !== "string" ||
+    typeof entry.reason_code !== "string" ||
+    typeof entry.status !== "string" ||
+    typeof entry.timestamp !== "string"
+  ) {
+    return null;
+  }
+  if (
+    entry.status !== "failed" &&
+    entry.status !== "processed" &&
+    entry.status !== "queued" &&
+    entry.status !== "skipped"
+  ) {
+    return null;
+  }
+  return {
+    action: entry.action,
+    duration_ms:
+      typeof entry.duration_ms === "number" && Number.isFinite(entry.duration_ms)
+        ? entry.duration_ms
+        : null,
+    filename: entry.filename,
+    final_path:
+      entry.final_path == null
+        ? null
+        : (toRepoRelative(paths, entry.final_path) ?? entry.final_path),
+    reason_code: entry.reason_code,
+    reason_detail: typeof entry.reason_detail === "string" ? entry.reason_detail : null,
+    receipt_path:
+      entry.receipt_path == null
+        ? null
+        : (toRepoRelative(paths, entry.receipt_path) ?? entry.receipt_path),
+    sha256: typeof entry.sha256 === "string" ? entry.sha256 : null,
+    status: entry.status as InterbeingWatcherV0LogStatus,
+    timestamp: entry.timestamp,
+    trace_id: typeof entry.trace_id === "string" ? entry.trace_id : null,
+    tool_name: typeof entry.tool_name === "string" ? entry.tool_name : WATCHER_TOOL_NAME,
+    watcher_version:
+      typeof entry.watcher_version === "string" ? entry.watcher_version : WATCHER_TOOL_VERSION,
+  };
+}
+
+function summarizeLatencyDurations(durations: number[]): InterbeingWatcherV0LatencySummary {
+  if (durations.length === 0) {
+    return {
+      avg_ms: 0,
+      count: 0,
+      max_ms: 0,
+      p95_ms: 0,
+    };
+  }
+  const sorted = [...durations].toSorted((left, right) => left - right);
+  const total = sorted.reduce((sum, value) => sum + value, 0);
+  const p95Index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * 0.95) - 1));
+  return {
+    avg_ms: Math.round(total / sorted.length),
+    count: sorted.length,
+    max_ms: sorted[sorted.length - 1] ?? 0,
+    p95_ms: sorted[p95Index] ?? 0,
+  };
+}
+
+function matchesWatcherReceiptFilters(
+  receipt: InterbeingWatcherV0Receipt,
+  filters: InterbeingWatcherV0ReceiptFilters,
+): boolean {
+  if (filters.disposition && receipt.final_disposition !== filters.disposition) {
+    return false;
+  }
+  if (filters.reasonCode && receipt.reason_code !== filters.reasonCode) {
+    return false;
+  }
+  if (filters.traceId && receipt.trace_id !== filters.traceId) {
+    return false;
+  }
+  return true;
+}
+
+export async function listWatcherLogEntries(
+  paths: InterbeingWatcherV0Paths,
+  options: InterbeingWatcherV0LogQuery = {},
+): Promise<InterbeingWatcherV0LogQuerySummary> {
+  const limit = Math.max(1, options.limit ?? 50);
+  const normalized = (await readWatcherLogEntries(paths.logPath))
+    .map((entry) => normalizeWatcherLogEntry(entry, paths))
+    .filter((entry): entry is InterbeingWatcherV0LogEntry => entry != null)
+    .filter((entry) => {
+      if (options.action && entry.action !== options.action) {
+        return false;
+      }
+      if (options.filename && entry.filename !== options.filename) {
+        return false;
+      }
+      if (options.reasonCode && entry.reason_code !== options.reasonCode) {
+        return false;
+      }
+      if (options.sha256 && entry.sha256 !== options.sha256) {
+        return false;
+      }
+      if (options.status && entry.status !== options.status) {
+        return false;
+      }
+      if (options.traceId && entry.trace_id !== options.traceId) {
+        return false;
+      }
+      return true;
+    })
+    .toSorted((left, right) => {
+      if (left.timestamp === right.timestamp) {
+        return right.filename.localeCompare(left.filename);
+      }
+      return right.timestamp.localeCompare(left.timestamp);
+    })
+    .slice(0, limit);
+
+  return {
+    items: normalized,
+    query: {
+      action: options.action ?? null,
+      filename: options.filename ?? null,
+      limit,
+      reason_code: options.reasonCode ?? null,
+      sha256: options.sha256 ?? null,
+      status: options.status ?? null,
+      trace_id: options.traceId ?? null,
+    },
+    tool_name: WATCHER_TOOL_NAME,
+    watcher_version: WATCHER_TOOL_VERSION,
+  };
+}
+
+function summarizeWatcherMetrics(params: {
+  logEntries: Array<Partial<InterbeingWatcherV0LogEntry>>;
+  nowMs: number;
+  receipts: InterbeingWatcherV0Receipt[];
+}): InterbeingWatcherV0MetricsSummary {
+  const lifetime = {
+    failed: params.receipts.filter((receipt) => receipt.final_disposition === "failed").length,
+    processed: params.receipts.filter((receipt) => receipt.final_disposition === "processed")
+      .length,
+    skipped: params.receipts.filter((receipt) => receipt.final_disposition === "skipped").length,
+  };
+  const recent = params.logEntries.filter(
+    (entry) =>
+      typeof entry.timestamp === "string" &&
+      isRecentIsoTimestamp(entry.timestamp, params.nowMs, WATCHER_HEALTH_RECENT_WINDOW_MS),
+  );
+  const recentProcessed = recent.filter((entry) => entry.status === "processed").length;
+  const recentFailed = recent.filter((entry) => entry.status === "failed").length;
+  const recentSkipped = recent.filter((entry) => entry.status === "skipped").length;
+  const recentTotal = recentProcessed + recentFailed + recentSkipped;
+  const latencyEntries = params.logEntries.filter(
+    (entry) =>
+      entry.action === "intake" &&
+      entry.status !== "queued" &&
+      typeof entry.duration_ms === "number" &&
+      Number.isFinite(entry.duration_ms),
+  );
+  const recentLatencyEntries = recent.filter(
+    (entry) =>
+      entry.action === "intake" &&
+      entry.status !== "queued" &&
+      typeof entry.duration_ms === "number" &&
+      Number.isFinite(entry.duration_ms),
+  );
+  return {
+    latency: {
+      lifetime: summarizeLatencyDurations(
+        latencyEntries.map((entry) => entry.duration_ms as number),
+      ),
+      recent_window: summarizeLatencyDurations(
+        recentLatencyEntries.map((entry) => entry.duration_ms as number),
+      ),
+    },
+    lifetime,
+    recent_window: {
+      error_rate: recentTotal === 0 ? 0 : Number((recentFailed / recentTotal).toFixed(3)),
+      failed: recentFailed,
+      minutes: WATCHER_HEALTH_RECENT_WINDOW_MS / 60_000,
+      processed: recentProcessed,
+      skipped: recentSkipped,
+      total: recentTotal,
+    },
+  };
+}
+
 async function readRecentWatcherFailures(
   paths: InterbeingWatcherV0Paths,
   limit = 5,
 ): Promise<InterbeingWatcherV0RecentLogIssueSummary[]> {
-  if (!(await pathExists(paths.logPath))) {
-    return [];
-  }
-
-  const raw = await readFile(paths.logPath, "utf8");
-  const lines = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  const lines = await readWatcherLogEntries(paths.logPath);
   const issues: InterbeingWatcherV0RecentLogIssueSummary[] = [];
 
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    let parsed: Partial<InterbeingWatcherV0LogEntry>;
-    try {
-      parsed = JSON.parse(lines[index]) as Partial<InterbeingWatcherV0LogEntry>;
-    } catch {
-      continue;
-    }
+    const parsed = lines[index] ?? {};
     if (parsed.status !== "failed" || typeof parsed.filename !== "string") {
       continue;
     }
@@ -1122,11 +1820,16 @@ async function readRecentWatcherFailures(
     }
     issues.push({
       action: parsed.action,
+      duration_ms:
+        typeof parsed.duration_ms === "number" && Number.isFinite(parsed.duration_ms)
+          ? parsed.duration_ms
+          : null,
       filename: parsed.filename,
       reason_code: parsed.reason_code,
       reason_detail: typeof parsed.reason_detail === "string" ? parsed.reason_detail : null,
       status: parsed.status,
       timestamp: parsed.timestamp,
+      trace_id: typeof parsed.trace_id === "string" ? parsed.trace_id : null,
     });
     if (issues.length >= limit) {
       break;
@@ -1199,6 +1902,7 @@ export async function summarizeWatcherStatus(
     },
     last_processed_timestamp: lastProcessed?.intake_timestamp ?? null,
     last_failed_timestamp: lastFailed?.intake_timestamp ?? null,
+    heartbeat_path: toRepoRelative(paths, paths.heartbeatPath) ?? paths.heartbeatPath,
     log_path: toRepoRelative(paths, paths.logPath) ?? paths.logPath,
     health: {
       status: issues.some((issue) => issue.startsWith("state_error"))
@@ -1215,15 +1919,18 @@ export async function summarizeWatcherHealth(
   paths: InterbeingWatcherV0Paths,
   deps: InterbeingWatcherV0HealthDeps = {},
 ): Promise<InterbeingWatcherV0HealthSummary> {
-  const [watcher, lock, service, journal, recentFailures, receipts] = await Promise.all([
-    summarizeWatcherStatus(paths),
-    (deps.inspectLock ?? inspectWatcherLock)(paths),
-    (deps.inspectService ?? inspectWatcherServiceRuntime)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
-    (deps.readJournalIssues ?? readWatcherJournalIssues)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
-    (deps.readRecentFailures ?? readRecentWatcherFailures)(paths),
-    listWatcherReceipts(paths),
-  ]);
   const nowMs = (deps.now ?? Date.now)();
+  const [watcher, heartbeat, lock, service, journal, recentFailures, receipts, logEntries] =
+    await Promise.all([
+      summarizeWatcherStatus(paths),
+      inspectWatcherHeartbeat(paths, nowMs),
+      (deps.inspectLock ?? inspectWatcherLock)(paths),
+      (deps.inspectService ?? inspectWatcherServiceRuntime)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
+      (deps.readJournalIssues ?? readWatcherJournalIssues)(WATCHER_SYSTEMD_SERVICE_NAME, paths),
+      (deps.readRecentFailures ?? readRecentWatcherFailures)(paths),
+      listWatcherReceipts(paths),
+      readWatcherLogEntries(paths.logPath),
+    ]);
   const recentJournal = {
     ...journal,
     errors: journal.errors.filter((entry) =>
@@ -1241,8 +1948,14 @@ export async function summarizeWatcherHealth(
     const processedTimestamp = latestProcessedByFilename.get(entry.filename);
     return processedTimestamp == null || processedTimestamp < entry.timestamp;
   });
+  const metrics = summarizeWatcherMetrics({
+    logEntries,
+    nowMs,
+    receipts,
+  });
 
   const issues = [...watcher.health.issues];
+  const anomalies: InterbeingWatcherV0Anomaly[] = [];
 
   const serviceIsRunning =
     service.available && service.active_state === "active" && service.sub_state === "running";
@@ -1281,11 +1994,63 @@ export async function summarizeWatcherHealth(
   if (activeRecentFailures.length > 0) {
     issues.push(`recent_failures:${activeRecentFailures.length}`);
   }
+  if (serviceIsRunning) {
+    if (heartbeat.status === "absent") {
+      issues.push("heartbeat_missing");
+      anomalies.push({
+        code: "heartbeat_missing",
+        detail: "service is running but no watcher heartbeat file is present",
+        severity: "warning",
+      });
+    } else if (heartbeat.status === "invalid") {
+      issues.push(`heartbeat_invalid:${heartbeat.detail ?? heartbeat.path}`);
+      anomalies.push({
+        code: "heartbeat_invalid",
+        detail: heartbeat.detail ?? "watcher heartbeat file is unreadable",
+        severity: "warning",
+      });
+    } else if (heartbeat.mode === "start" && heartbeat.status === "stale") {
+      issues.push(`heartbeat_stale:${heartbeat.age_seconds ?? "unknown"}`);
+      anomalies.push({
+        code: "heartbeat_stale",
+        detail: `watcher heartbeat has not updated for ${heartbeat.age_seconds ?? "unknown"}s`,
+        severity: "error",
+      });
+    }
+  }
+  if (
+    metrics.recent_window.failed >= WATCHER_FAILURE_BURST_THRESHOLD &&
+    metrics.recent_window.error_rate >= 0.5
+  ) {
+    issues.push(`failure_burst:${metrics.recent_window.failed}/${metrics.recent_window.total}`);
+    anomalies.push({
+      code: "failure_burst",
+      detail: `${metrics.recent_window.failed} of ${metrics.recent_window.total} recent watcher events failed`,
+      severity: "warning",
+    });
+  }
+  if (metrics.recent_window.total >= WATCHER_TASK_VOLUME_THRESHOLD) {
+    issues.push(`task_volume_spike:${metrics.recent_window.total}`);
+    anomalies.push({
+      code: "task_volume_spike",
+      detail: `${metrics.recent_window.total} watcher events were recorded in the last ${metrics.recent_window.minutes} minutes`,
+      severity: "warning",
+    });
+  }
+  if (metrics.latency.recent_window.max_ms >= WATCHER_SLOW_PROCESSING_THRESHOLD_MS) {
+    issues.push(`slow_processing:${metrics.latency.recent_window.max_ms}`);
+    anomalies.push({
+      code: "slow_processing",
+      detail: `recent watcher processing reached ${metrics.latency.recent_window.max_ms}ms`,
+      severity: "warning",
+    });
+  }
 
   const healthStatus =
     watcher.health.status === "error" ||
     (service.available && !serviceIsRunning) ||
-    lock.status === "stale"
+    lock.status === "stale" ||
+    anomalies.some((anomaly) => anomaly.severity === "error")
       ? "error"
       : issues.length > 0
         ? "warning"
@@ -1293,6 +2058,7 @@ export async function summarizeWatcherHealth(
 
   return {
     health: {
+      anomalies,
       status: healthStatus,
       issues,
     },
@@ -1301,21 +2067,40 @@ export async function summarizeWatcherHealth(
     tool_name: WATCHER_TOOL_NAME,
     watcher: {
       ...watcher,
+      heartbeat,
       lock,
+      metrics,
       recent_failures: activeRecentFailures,
     },
     watcher_version: WATCHER_TOOL_VERSION,
   };
 }
 
+async function readTraceIdFromEnvelopeFile(filePath: string): Promise<string | null> {
+  try {
+    const raw = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+    const envelope = parseSubmitTaskEnvelopeV0(raw, {
+      allowTargetMismatch: true,
+      nodeId:
+        typeof (raw as { target_node?: unknown })?.target_node === "string"
+          ? String((raw as { target_node?: unknown }).target_node)
+          : "dali",
+    });
+    return resolveInterbeingTraceId(envelope);
+  } catch {
+    return null;
+  }
+}
+
 export async function verifyWatcherArtifact(
   paths: InterbeingWatcherV0Paths,
-  params: { filename?: string; sha256?: string },
+  params: { filename?: string; sha256?: string; traceId?: string },
 ): Promise<InterbeingWatcherV0VerifySummary> {
   const filename = params.filename?.trim() || null;
   const sha256 = params.sha256?.trim() || null;
-  if (!filename && !sha256) {
-    throw new Error("verify requires --filename or --sha256");
+  const traceId = params.traceId?.trim() || null;
+  if (!filename && !sha256 && !traceId) {
+    throw new Error("verify requires --filename, --sha256, or --trace-id");
   }
 
   const matches: InterbeingWatcherV0VerifyMatch[] = [];
@@ -1327,7 +2112,8 @@ export async function verifyWatcherArtifact(
       (filename &&
         receipt.original_filename !== filename &&
         path.basename(receipt.final_path) !== filename) ||
-      (sha256 && receipt.sha256 !== sha256)
+      (sha256 && receipt.sha256 !== sha256) ||
+      (traceId && receipt.trace_id !== traceId)
     ) {
       continue;
     }
@@ -1340,6 +2126,7 @@ export async function verifyWatcherArtifact(
       reason_code: receipt.reason_code,
       receipt_path: receipt.receipt_path,
       sha256: receipt.sha256,
+      trace_id: receipt.trace_id,
       tracked_hash:
         receipt.sha256 != null ? Boolean(trackedHashes?.processed_hashes[receipt.sha256]) : false,
     });
@@ -1349,6 +2136,10 @@ export async function verifyWatcherArtifact(
   for (const filePath of incoming) {
     const baseName = path.basename(filePath);
     if (filename && baseName !== filename) {
+      continue;
+    }
+    const resolvedTraceId = await readTraceIdFromEnvelopeFile(filePath);
+    if (traceId && resolvedTraceId !== traceId) {
       continue;
     }
     const fileSha = sha256 ? await hashFileContents(filePath) : null;
@@ -1363,6 +2154,7 @@ export async function verifyWatcherArtifact(
       reason_code: null,
       receipt_path: null,
       sha256: fileSha,
+      trace_id: resolvedTraceId,
       tracked_hash: fileSha != null ? Boolean(trackedHashes?.processed_hashes[fileSha]) : false,
     });
   }
@@ -1389,46 +2181,214 @@ export async function verifyWatcherArtifact(
     tool_name: WATCHER_TOOL_NAME,
     watcher_version: WATCHER_TOOL_VERSION,
     found: normalizedMatches.length > 0,
-    query: { filename, sha256 },
+    query: { filename, sha256, trace_id: traceId },
     matches: normalizedMatches,
   };
 }
 
-export async function listRecentWatcherReceipts(
+async function readWatcherInputEnvelope(
   paths: InterbeingWatcherV0Paths,
-  limit = 10,
-): Promise<{ items: InterbeingWatcherV0Receipt[]; tool_name: string; watcher_version: string }> {
-  const receipts = await listWatcherReceipts(paths);
-  return {
-    tool_name: WATCHER_TOOL_NAME,
-    watcher_version: WATCHER_TOOL_VERSION,
-    items: receipts.slice(0, Math.max(0, limit)).map((receipt) => ({
+  pathOrRelativePath: string,
+): Promise<{
+  contents: unknown;
+  exists: boolean;
+  path: string;
+}> {
+  const resolved = path.isAbsolute(pathOrRelativePath)
+    ? pathOrRelativePath
+    : path.join(resolveWatcherRepoRoot(paths), pathOrRelativePath);
+  if (!(await pathExists(resolved))) {
+    return {
+      contents: null,
+      exists: false,
+      path: pathOrRelativePath,
+    };
+  }
+  try {
+    return {
+      contents: JSON.parse(await readFile(resolved, "utf8")) as unknown,
+      exists: true,
+      path: pathOrRelativePath,
+    };
+  } catch {
+    return {
+      contents: null,
+      exists: true,
+      path: pathOrRelativePath,
+    };
+  }
+}
+
+export async function writeInterbeingWatcherReport(params: {
+  filename?: string;
+  outPath?: string;
+  paths: InterbeingWatcherV0Paths;
+  sha256?: string;
+  traceId?: string;
+}): Promise<InterbeingWatcherV0ReportSummary> {
+  const verify = await verifyWatcherArtifact(params.paths, {
+    filename: params.filename,
+    sha256: params.sha256,
+    traceId: params.traceId,
+  });
+  const status = await summarizeWatcherStatus(params.paths);
+  const health = await summarizeWatcherHealth(params.paths);
+  const receipts = await listWatcherReceipts(params.paths);
+  const filteredReceipts = receipts.filter((receipt) => {
+    if (params.filename && receipt.original_filename !== params.filename) {
+      return false;
+    }
+    if (params.sha256 && receipt.sha256 !== params.sha256) {
+      return false;
+    }
+    if (params.traceId && receipt.trace_id !== params.traceId) {
+      return false;
+    }
+    return true;
+  });
+  const traceForLogs =
+    params.traceId ??
+    verify.matches
+      .map((match) => match.trace_id)
+      .find((traceId): traceId is string => traceId != null) ??
+    null;
+  const logs = await listWatcherLogEntries(params.paths, {
+    filename: params.filename,
+    limit: 200,
+    sha256: params.sha256,
+    traceId: traceForLogs ?? undefined,
+  });
+  const inputEnvelopes = await Promise.all(
+    verify.matches.map((match) => readWatcherInputEnvelope(params.paths, match.file)),
+  );
+  const reportSlugSource =
+    params.traceId ?? params.filename ?? params.sha256 ?? verify.matches[0]?.file ?? "query";
+  const defaultOutPath = path.join(
+    resolveWatcherRepoRoot(params.paths),
+    "workspace",
+    "audit",
+    WATCHER_OUTPUT_ROOT,
+    "reports",
+    `${slugifyFragment(reportSlugSource)}.report.json`,
+  );
+  const outputPath = path.resolve(params.outPath ?? defaultOutPath);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const report: InterbeingWatcherV0ReportSummary = {
+    environment: {
+      arch: process.arch,
+      cwd: resolveWatcherRepoRoot(params.paths),
+      node_version: process.version,
+      platform: process.platform,
+    },
+    generated_at: nowIso(),
+    health,
+    input_envelopes: inputEnvelopes,
+    log_entries: logs.items,
+    matches: verify.matches,
+    output_path: toRepoRelative(params.paths, outputPath) ?? outputPath,
+    query: verify.query,
+    receipts: filteredReceipts.map((receipt) => ({
       ...receipt,
-      final_path: toRepoRelative(paths, receipt.final_path) ?? receipt.final_path,
-      intake_path: toRepoRelative(paths, receipt.intake_path) ?? receipt.intake_path,
-      receipt_path: toRepoRelative(paths, receipt.receipt_path) ?? receipt.receipt_path,
+      final_path: toRepoRelative(params.paths, receipt.final_path) ?? receipt.final_path,
+      intake_path: toRepoRelative(params.paths, receipt.intake_path) ?? receipt.intake_path,
+      receipt_path: toRepoRelative(params.paths, receipt.receipt_path) ?? receipt.receipt_path,
       evidence: {
         ...receipt.evidence,
         lifecycle_output_dir:
           receipt.evidence.lifecycle_output_dir == null
             ? null
-            : (toRepoRelative(paths, receipt.evidence.lifecycle_output_dir) ??
+            : (toRepoRelative(params.paths, receipt.evidence.lifecycle_output_dir) ??
               receipt.evidence.lifecycle_output_dir),
-        log_path: toRepoRelative(paths, receipt.evidence.log_path) ?? receipt.evidence.log_path,
+        log_path:
+          toRepoRelative(params.paths, receipt.evidence.log_path) ?? receipt.evidence.log_path,
         state_path:
-          toRepoRelative(paths, receipt.evidence.state_path) ?? receipt.evidence.state_path,
+          toRepoRelative(params.paths, receipt.evidence.state_path) ?? receipt.evidence.state_path,
       },
     })),
+    status,
+    tool_name: WATCHER_TOOL_NAME,
+    watcher_version: WATCHER_TOOL_VERSION,
+  };
+  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  return report;
+}
+
+async function resolveReplaySourceByQuery(params: {
+  filename?: string;
+  paths: InterbeingWatcherV0Paths;
+  sha256?: string;
+  traceId?: string;
+}): Promise<InterbeingWatcherV0Receipt> {
+  const receipts = await listWatcherReceipts(params.paths);
+  const match = receipts.find((receipt) => {
+    if (params.filename && receipt.original_filename !== params.filename) {
+      return false;
+    }
+    if (params.sha256 && receipt.sha256 !== params.sha256) {
+      return false;
+    }
+    if (params.traceId && receipt.trace_id !== params.traceId) {
+      return false;
+    }
+    return true;
+  });
+  if (!match) {
+    throw new Error("replay query did not match any processed or failed receipt");
+  }
+  return match;
+}
+
+export async function listRecentWatcherReceipts(
+  paths: InterbeingWatcherV0Paths,
+  limit = 10,
+  filters: InterbeingWatcherV0ReceiptFilters = {},
+): Promise<{ items: InterbeingWatcherV0Receipt[]; tool_name: string; watcher_version: string }> {
+  const receipts = await listWatcherReceipts(paths);
+  return {
+    tool_name: WATCHER_TOOL_NAME,
+    watcher_version: WATCHER_TOOL_VERSION,
+    items: receipts
+      .filter((receipt) => matchesWatcherReceiptFilters(receipt, filters))
+      .slice(0, Math.max(0, limit))
+      .map((receipt) => ({
+        ...receipt,
+        final_path: toRepoRelative(paths, receipt.final_path) ?? receipt.final_path,
+        intake_path: toRepoRelative(paths, receipt.intake_path) ?? receipt.intake_path,
+        receipt_path: toRepoRelative(paths, receipt.receipt_path) ?? receipt.receipt_path,
+        evidence: {
+          ...receipt.evidence,
+          lifecycle_output_dir:
+            receipt.evidence.lifecycle_output_dir == null
+              ? null
+              : (toRepoRelative(paths, receipt.evidence.lifecycle_output_dir) ??
+                receipt.evidence.lifecycle_output_dir),
+          log_path: toRepoRelative(paths, receipt.evidence.log_path) ?? receipt.evidence.log_path,
+          state_path:
+            toRepoRelative(paths, receipt.evidence.state_path) ?? receipt.evidence.state_path,
+        },
+      })),
   };
 }
 
 export async function queueReplayIntoIncoming(params: {
+  filename?: string;
   filePath: string;
   forceReprocess?: boolean;
   paths: InterbeingWatcherV0Paths;
+  sha256?: string;
+  traceId?: string;
 }): Promise<InterbeingWatcherV0ReplaySummary> {
   return await withWatcherMutationLock(params.paths, async () => {
-    const sourcePath = path.resolve(params.filePath);
+    const selectedReceipt =
+      params.filePath.trim().length > 0
+        ? null
+        : await resolveReplaySourceByQuery({
+            filename: params.filename,
+            paths: params.paths,
+            sha256: params.sha256,
+            traceId: params.traceId,
+          });
+    const sourcePath = path.resolve(selectedReceipt?.final_path ?? params.filePath);
     const isFailedSource = sourcePath.startsWith(path.resolve(params.paths.failedDir) + path.sep);
     const isProcessedSource = sourcePath.startsWith(
       path.resolve(params.paths.processedDir) + path.sep,
@@ -1444,6 +2404,7 @@ export async function queueReplayIntoIncoming(params: {
     }
 
     const sha256 = await hashFileContents(sourcePath);
+    const traceId = await readTraceIdFromEnvelopeFile(sourcePath);
     const state = await readWatcherState(params.paths.statePath);
     const alreadyProcessed = Boolean(state.processed_hashes[sha256]);
     if (alreadyProcessed && !params.forceReprocess) {
@@ -1461,6 +2422,7 @@ export async function queueReplayIntoIncoming(params: {
     const reasonCode = params.forceReprocess ? "force_reprocess_requested" : "replay_requested";
     await appendWatcherLog(params.paths.logPath, {
       action: "replay",
+      duration_ms: null,
       filename: path.basename(sourcePath),
       final_path: toRepoRelative(params.paths, queuedPath),
       reason_code: reasonCode,
@@ -1469,6 +2431,7 @@ export async function queueReplayIntoIncoming(params: {
       sha256,
       status: "queued",
       timestamp: nowIso(),
+      trace_id: traceId,
       tool_name: WATCHER_TOOL_NAME,
       watcher_version: WATCHER_TOOL_VERSION,
     });
@@ -1479,8 +2442,19 @@ export async function queueReplayIntoIncoming(params: {
       force_reprocess: Boolean(params.forceReprocess),
       queued_path: toRepoRelative(params.paths, queuedPath) ?? queuedPath,
       reason_code: reasonCode,
+      selected_source: selectedReceipt
+        ? {
+            disposition: selectedReceipt.final_disposition,
+            file:
+              toRepoRelative(params.paths, selectedReceipt.final_path) ??
+              selectedReceipt.final_path,
+            intake_timestamp: selectedReceipt.intake_timestamp,
+            trace_id: selectedReceipt.trace_id,
+          }
+        : null,
       sha256,
       source_file: toRepoRelative(params.paths, sourcePath) ?? sourcePath,
+      trace_id: traceId,
     };
   });
 }

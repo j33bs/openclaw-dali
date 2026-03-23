@@ -1,5 +1,5 @@
 import type { ValidateFunction } from "ajv";
-import Ajv2020Pkg from "ajv/dist/2020";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import eventEnvelopeSchemaV0 from "../../schemas/event-envelope.v0.json" with { type: "json" };
 import taskEnvelopeSchemaV0 from "../../schemas/task-envelope.v0.json" with { type: "json" };
@@ -11,8 +11,7 @@ import {
   parseSubmitTaskEnvelopeV0,
 } from "./interbeing-task-lifecycle-v0.js";
 
-const Ajv = Ajv2020Pkg as unknown as typeof Ajv2020Pkg;
-const ajv = new Ajv({ allErrors: true, strict: false });
+const ajv = new Ajv2020({ allErrors: true, strict: false });
 
 ajv.addFormat("date-time", {
   type: "string",

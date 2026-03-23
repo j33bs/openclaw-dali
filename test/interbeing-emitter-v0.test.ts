@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   emitInterbeingTaskV0,
   listInterbeingEmitterV0,
+  listInterbeingEmitterV0LogEntries,
   resolveInterbeingEmitterV0Paths,
   verifyInterbeingEmitterV0,
 } from "../scripts/interbeing/emitter_v0_support.ts";
@@ -46,20 +47,42 @@ describe("interbeing emitter v0", () => {
     expect(result.duplicate).toBe(false);
     expect(result.queuePath).toContain(path.join("handoff", "outgoing", "c_lawd"));
     expect(result.receiptPath).toBe(`${result.queuePath}.receipt.json`);
+    expect(result.traceId).toBe("corr-outbound-001");
 
+    const queuedEnvelope = JSON.parse(await readFile(result.queuePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(
+      ((queuedEnvelope.payload as Record<string, unknown>)._interbeing as Record<string, unknown>)
+        .trace_id,
+    ).toBe("corr-outbound-001");
     const receipt = JSON.parse(await readFile(result.receiptPath, "utf8")) as Record<
       string,
       unknown
     >;
     expect(receipt.target_node).toBe("c_lawd");
     expect(receipt.task_id).toBe("task-outbound-001");
+    expect(receipt.trace_id).toBe("corr-outbound-001");
+    expect(receipt.delivery_receipt).toMatchObject({
+      accepted: false,
+      delivered_to: null,
+      status: "queued_only",
+    });
 
     const listed = await listInterbeingEmitterV0(cwd, 5);
     expect(listed).toHaveLength(1);
     expect(listed[0]?.queue_path.startsWith(paths.outgoingRoot)).toBe(true);
+    expect(listed[0]?.trace_id).toBe("corr-outbound-001");
 
     const verified = await verifyInterbeingEmitterV0(cwd, { filename: result.filename });
     expect(verified?.sha256).toBe(result.sha256);
+    expect(verified?.trace_id).toBe("corr-outbound-001");
+
+    const verifiedByTrace = await verifyInterbeingEmitterV0(cwd, {
+      traceId: "corr-outbound-001",
+    });
+    expect(verifiedByTrace?.filename).toBe(result.filename);
   });
 
   it("deduplicates identical emissions by default", async () => {
@@ -74,6 +97,11 @@ describe("interbeing emitter v0", () => {
 
     const listed = await listInterbeingEmitterV0(cwd, 10);
     expect(listed).toHaveLength(1);
+
+    const logs = await listInterbeingEmitterV0LogEntries(cwd, {
+      traceId: "corr-outbound-001",
+    });
+    expect(logs.items.map((item) => item.action).toSorted()).toEqual(["duplicate_emit", "emit"]);
   });
 
   it("can deliver a copy into an external bridge directory", async () => {
@@ -84,14 +112,38 @@ describe("interbeing emitter v0", () => {
       {
         cwd,
         deliverDir,
+        traceId: "trace-outbound-bridge-001",
       },
     );
 
     expect(result.deliveredTo).toBe(path.join(deliverDir, result.filename));
+    expect(result.traceId).toBe("trace-outbound-bridge-001");
+    expect(result.deliveryReceipt).toMatchObject({
+      accepted: true,
+      delivered_to: path.join(deliverDir, result.filename),
+      status: "accepted",
+    });
     const copied = JSON.parse(await readFile(result.deliveredTo!, "utf8")) as Record<
       string,
       unknown
     >;
     expect(copied.task_id).toBe("task-outbound-bridge-001");
+
+    const receipt = JSON.parse(await readFile(result.receiptPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(receipt.trace_id).toBe("trace-outbound-bridge-001");
+    expect(receipt.delivery_receipt).toMatchObject({
+      accepted: true,
+      delivered_to: path.join(deliverDir, result.filename),
+      status: "accepted",
+    });
+
+    const listed = await listInterbeingEmitterV0(cwd, 10, {
+      traceId: "trace-outbound-bridge-001",
+    });
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.filename).toBe(result.filename);
   });
 });

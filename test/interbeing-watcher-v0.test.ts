@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runInterbeingE2ELocalV0 } from "../scripts/dev/interbeing-e2e-local-v0.ts";
 import { DEFAULT_INTERBEING_DIR } from "../scripts/interbeing/interbeing_paths.ts";
@@ -8,7 +9,9 @@ import {
   getInterbeingWatcherV0Health,
   getInterbeingWatcherV0Status,
   listInterbeingWatcherV0Items,
+  queryInterbeingWatcherV0Logs,
   replayInterbeingWatcherV0,
+  reportInterbeingWatcherV0,
   runInterbeingWatcherV0,
   verifyInterbeingWatcherV0,
 } from "../scripts/interbeing/watch_handoff_v0.ts";
@@ -19,6 +22,7 @@ import {
   resolveInterbeingWatcherV0Paths,
   resolveWatcherLockPath,
   withWatcherMutationLock,
+  writeWatcherHeartbeat,
 } from "../scripts/interbeing/watcher_v0_support.ts";
 
 type SubmitTaskEnvelope = {
@@ -118,10 +122,29 @@ async function writeEnvelope(params: {
 
 async function createSuccessfulLifecycleRunner(outputDir: string): Promise<void> {
   await mkdir(outputDir, { recursive: true });
-  await writeFile(
-    path.join(outputDir, "event-envelope.json"),
-    '{\n  "event_type": "task.running"\n}\n',
-  );
+  const resultSummaryPath = path.join(outputDir, "result-summary.json");
+  await Promise.all([
+    writeFile(
+      path.join(outputDir, "event-envelope.json"),
+      '{\n  "event_type": "task.running"\n}\n',
+    ),
+    writeFile(resultSummaryPath, '{\n  "outcome": "succeeded"\n}\n'),
+    writeFile(
+      path.join(outputDir, "task-status-succeeded.json"),
+      `${JSON.stringify(
+        {
+          result_ref: {
+            content_type: "application/json",
+            uri: pathToFileURL(resultSummaryPath).href,
+          },
+          status: "succeeded",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    ),
+  ]);
 }
 
 async function readTextFile(filePath: string): Promise<string> {
@@ -248,7 +271,14 @@ describe("interbeing watcher v0 hardening", () => {
 
   it("returns a stable status shape and verifies artifacts by filename and sha256", async () => {
     const cwd = await createTempRepoRoot();
-    const envelope = createEnvelope();
+    const envelope = createEnvelope({
+      payload: {
+        _interbeing: {
+          trace_id: "trace-status-001",
+        },
+        intent: "test",
+      },
+    });
     const intakeFile = await writeEnvelope({
       cwd,
       envelope,
@@ -269,6 +299,8 @@ describe("interbeing watcher v0 hardening", () => {
       "status",
       "health",
       "list",
+      "logs",
+      "report",
       "verify",
       "replay",
     ]);
@@ -296,6 +328,102 @@ describe("interbeing watcher v0 hardening", () => {
     });
     expect(byHash.found).toBe(true);
     expect(byHash.matches.some((match) => match.tracked_hash)).toBe(true);
+
+    const byTrace = await verifyInterbeingWatcherV0({
+      cwd,
+      traceId: "trace-status-001",
+    });
+    expect(byTrace.found).toBe(true);
+    expect(byTrace.matches[0]).toMatchObject({
+      disposition: "processed",
+      trace_id: "trace-status-001",
+    });
+  });
+
+  it("filters receipt lists and watcher logs by trace and writes a reproducible report", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await Promise.all([
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          task_id: "task-report-ok-001",
+          correlation_id: "corr-report-ok-001",
+          payload: {
+            _interbeing: {
+              trace_id: "trace-report-001",
+            },
+            intent: "ok",
+          },
+        }),
+        filename: "report-ok.task-envelope.v0.json",
+      }),
+      writeEnvelope({
+        cwd,
+        envelope: createEnvelope({
+          schema_version: "v1",
+          task_id: "task-report-fail-001",
+          correlation_id: "corr-report-fail-001",
+          payload: {
+            _interbeing: {
+              trace_id: "trace-report-001",
+            },
+            intent: "fail",
+          },
+        }),
+        filename: "report-fail.task-envelope.v0.json",
+      }),
+    ]);
+
+    await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async ({ outputDir }) => createSuccessfulLifecycleRunner(outputDir),
+    });
+
+    const listed = await listInterbeingWatcherV0Items({
+      cwd,
+      disposition: "failed",
+      limit: 10,
+      traceId: "trace-report-001",
+    });
+    const listedItems = listed.items as Array<{ original_filename: string; trace_id: string }>;
+    expect(listedItems).toHaveLength(1);
+    expect(listedItems[0]).toMatchObject({
+      original_filename: "report-fail.task-envelope.v0.json",
+      trace_id: "trace-report-001",
+    });
+
+    const logs = await queryInterbeingWatcherV0Logs({
+      cwd,
+      limit: 10,
+      traceId: "trace-report-001",
+    });
+    expect(logs.items.map((item) => item.filename).toSorted()).toEqual([
+      "report-fail.task-envelope.v0.json",
+      "report-ok.task-envelope.v0.json",
+    ]);
+    expect(logs.items.every((item) => item.trace_id === "trace-report-001")).toBe(true);
+
+    const report = await reportInterbeingWatcherV0({
+      cwd,
+      traceId: "trace-report-001",
+    });
+    expect(report.query.trace_id).toBe("trace-report-001");
+    expect(report.matches).toHaveLength(2);
+    expect(report.receipts).toHaveLength(2);
+    expect(report.log_entries).toHaveLength(2);
+
+    const savedReport = await readJsonFile<{ output_path: string; receipts: unknown[] }>(
+      path.join(cwd, report.output_path),
+    );
+    expect(savedReport.receipts).toHaveLength(2);
+    expect(report.output_path.startsWith("workspace/audit/interbeing-watcher-v0/reports/")).toBe(
+      true,
+    );
+    await expect(
+      readFile(path.join(paths.processedDir, "report-ok.task-envelope.v0.json"), "utf8"),
+    ).resolves.toContain('"task_id": "task-report-ok-001"');
   });
 
   it("replays a failed item back into intake and processes it on the next run", async () => {
@@ -346,6 +474,198 @@ describe("interbeing watcher v0 hardening", () => {
       final_disposition: "processed",
       reason_code: "processed",
     });
+  });
+
+  it("fails closed when a lifecycle run omits succeeded status artifacts", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        correlation_id: "corr-silent-failure-001",
+        task_id: "task-silent-failure-001",
+      }),
+      filename: "silent-failure.task-envelope.v0.json",
+    });
+
+    const summary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async () => undefined,
+    });
+
+    expect(summary).toEqual({
+      mode: "once",
+      processed: 0,
+      skipped: 0,
+      failed: 1,
+    });
+    expect(
+      await readJsonFile<{ final_disposition: string; reason_code: string; reason_detail: string }>(
+        buildReceiptPath(path.join(paths.failedDir, "silent-failure.task-envelope.v0.json")),
+      ),
+    ).toMatchObject({
+      final_disposition: "failed",
+      reason_code: "silent_failure_detected",
+      reason_detail: "missing task-status-succeeded.json",
+    });
+
+    const state = await readWatcherState(paths.statePath);
+    expect(Object.keys(state.processed_hashes)).toHaveLength(0);
+
+    const logs = await queryInterbeingWatcherV0Logs({
+      cwd,
+      limit: 10,
+      reasonCode: "silent_failure_detected",
+    });
+    expect(logs.items[0]).toMatchObject({
+      filename: "silent-failure.task-envelope.v0.json",
+      reason_code: "silent_failure_detected",
+      status: "failed",
+    });
+  });
+
+  it("replays the latest matching failed receipt by trace id", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        task_id: "task-replay-trace-001",
+        correlation_id: "corr-replay-trace-001",
+        payload: {
+          _interbeing: {
+            trace_id: "trace-replay-query-001",
+          },
+          intent: "replay-trace",
+        },
+      }),
+      filename: "replay-trace.task-envelope.v0.json",
+    });
+
+    let shouldFail = true;
+    await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async () => {
+        if (shouldFail) {
+          throw new Error("simulated processing failure");
+        }
+      },
+    });
+
+    const replaySummary = await replayInterbeingWatcherV0({
+      cwd,
+      traceId: "trace-replay-query-001",
+    });
+    expect(replaySummary.reason_code).toBe("replay_requested");
+    expect(replaySummary.selected_source).toMatchObject({
+      disposition: "failed",
+      file: "handoff/failed/dali/replay-trace.task-envelope.v0.json",
+      trace_id: "trace-replay-query-001",
+    });
+
+    shouldFail = false;
+    const secondSummary = await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async ({ outputDir }) => createSuccessfulLifecycleRunner(outputDir),
+    });
+
+    expect(secondSummary).toEqual({
+      mode: "once",
+      processed: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(
+      await readJsonFile<{ final_disposition: string; trace_id: string }>(
+        buildReceiptPath(path.join(paths.processedDir, "replay-trace.task-envelope.v0.json")),
+      ),
+    ).toMatchObject({
+      final_disposition: "processed",
+      trace_id: "trace-replay-query-001",
+    });
+  });
+
+  it("captures processing durations in watcher logs and surfaces slow-path anomalies", async () => {
+    const cwd = await createTempRepoRoot();
+    await writeEnvelope({
+      cwd,
+      envelope: createEnvelope({
+        correlation_id: "corr-slow-health-001",
+        task_id: "task-slow-health-001",
+      }),
+      filename: "slow-health.task-envelope.v0.json",
+    });
+
+    await runInterbeingWatcherV0({
+      cwd,
+      mode: "once",
+      runLifecycle: async ({ outputDir }) => {
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        await createSuccessfulLifecycleRunner(outputDir);
+      },
+    });
+
+    const logs = await queryInterbeingWatcherV0Logs({
+      cwd,
+      filename: "slow-health.task-envelope.v0.json",
+      limit: 10,
+    });
+    expect(logs.items[0]?.duration_ms).toBeGreaterThanOrEqual(2_000);
+
+    const health = await getInterbeingWatcherV0Health({
+      cwd,
+      deps: {
+        inspectLock: async () => ({
+          acquired_at: null,
+          age_seconds: null,
+          detail: null,
+          exists: false,
+          owner_command: null,
+          owner_matches_watcher: null,
+          path: "workspace/state/interbeing_watcher_v0.lock",
+          pid: null,
+          status: "absent",
+          tool_name: null,
+          watcher_version: null,
+        }),
+        inspectService: async () => ({
+          active_enter_timestamp: "Thu 2026-03-19 11:00:00 UTC",
+          active_state: "active",
+          available: true,
+          detail: null,
+          exec_main_code: "0",
+          exec_main_status: 0,
+          fragment_path: "scripts/systemd/openclaw-interbeing-watcher.service",
+          load_state: "loaded",
+          main_pid: 1234,
+          n_restarts: 0,
+          result: "success",
+          sub_state: "running",
+          unit: "openclaw-interbeing-watcher.service",
+          unit_file_state: "enabled",
+        }),
+        readJournalIssues: async () => ({
+          available: true,
+          detail: null,
+          errors: [],
+          unit: "openclaw-interbeing-watcher.service",
+          warnings: [],
+        }),
+        readRecentFailures: async () => [],
+      },
+    });
+
+    expect(health.watcher.metrics.latency.recent_window.count).toBe(1);
+    expect(health.watcher.metrics.latency.recent_window.max_ms).toBeGreaterThanOrEqual(2_000);
+    expect(health.health.issues.some((issue) => issue.startsWith("slow_processing:"))).toBe(true);
+    expect(
+      health.health.anomalies.some(
+        (anomaly) => anomaly.code === "slow_processing" && anomaly.severity === "warning",
+      ),
+    ).toBe(true);
   });
 
   it("requires explicit force_reprocess before replaying a previously processed hash", async () => {
@@ -457,6 +777,7 @@ describe("interbeing watcher v0 hardening", () => {
         readRecentFailures: async () => [
           {
             action: "intake",
+            duration_ms: null,
             filename: "invalid-schema-version.task-envelope.v0.json",
             reason_code: "schema_version_invalid",
             reason_detail: '"v1"',
@@ -471,6 +792,11 @@ describe("interbeing watcher v0 hardening", () => {
     expect(health.service.fragment_path).toBe(
       "scripts/systemd/openclaw-interbeing-watcher.service",
     );
+    expect(health.watcher.heartbeat.path).toBe(
+      "workspace/state/interbeing_watcher_v0.heartbeat.json",
+    );
+    expect(health.watcher.heartbeat.available).toBe(true);
+    expect(health.watcher.metrics.lifetime.processed).toBe(1);
     expect(health.watcher.counts.processed).toBe(1);
     expect(health.watcher.lock.status).toBe("absent");
     expect(health.watcher.state.readable).toBe(true);
@@ -544,6 +870,7 @@ describe("interbeing watcher v0 hardening", () => {
         readRecentFailures: async () => [
           {
             action: "intake",
+            duration_ms: null,
             filename: "invalid-schema-version.task-envelope.v0.json",
             reason_code: "schema_version_invalid",
             reason_detail: '"v1"',
@@ -559,6 +886,90 @@ describe("interbeing watcher v0 hardening", () => {
     expect(health.health.status).toBe("ok");
     expect(health.health.issues).not.toContain("journal_warnings:1");
     expect(health.health.issues).not.toContain("recent_failures:1");
+  });
+
+  it("flags stale watcher heartbeats as anomalies when the service should be running", async () => {
+    const cwd = await createTempRepoRoot();
+    const paths = resolveInterbeingWatcherV0Paths(cwd);
+    await mkdir(path.dirname(paths.heartbeatPath), { recursive: true });
+    await writeWatcherHeartbeat(paths.heartbeatPath, {
+      last_failed_timestamp: "2026-03-19T10:01:00.000Z",
+      last_processed_timestamp: "2026-03-19T10:00:30.000Z",
+      last_seen_at: "2026-03-19T10:00:10.000Z",
+      mode: "start",
+      pid: 4321,
+      session_id: "watcher-session-stale-001",
+      started_at: "2026-03-19T10:00:00.000Z",
+      totals: {
+        failed: 1,
+        processed: 4,
+        skipped: 0,
+      },
+    });
+
+    const health = await getInterbeingWatcherV0Health({
+      cwd,
+      deps: {
+        now: () => Date.parse("2026-03-19T11:10:00.000Z"),
+        inspectLock: async () => ({
+          acquired_at: null,
+          age_seconds: null,
+          detail: null,
+          exists: false,
+          owner_command: null,
+          owner_matches_watcher: null,
+          path: "workspace/state/interbeing_watcher_v0.lock",
+          pid: null,
+          status: "absent",
+          tool_name: null,
+          watcher_version: null,
+        }),
+        inspectService: async () => ({
+          active_enter_timestamp: "Thu 2026-03-19 10:00:00 UTC",
+          active_state: "active",
+          available: true,
+          detail: null,
+          exec_main_code: "0",
+          exec_main_status: 0,
+          fragment_path: "scripts/systemd/openclaw-interbeing-watcher.service",
+          load_state: "loaded",
+          main_pid: 4321,
+          n_restarts: 0,
+          result: "success",
+          sub_state: "running",
+          unit: "openclaw-interbeing-watcher.service",
+          unit_file_state: "enabled",
+        }),
+        readJournalIssues: async () => ({
+          available: true,
+          detail: null,
+          errors: [],
+          unit: "openclaw-interbeing-watcher.service",
+          warnings: [],
+        }),
+        readRecentFailures: async () => [],
+      },
+    });
+
+    expect(health.watcher.heartbeat).toMatchObject({
+      available: true,
+      mode: "start",
+      pid: 4321,
+      session_id: "watcher-session-stale-001",
+      status: "stale",
+      totals: {
+        failed: 1,
+        processed: 4,
+        skipped: 0,
+      },
+    });
+    expect(health.health.status).toBe("error");
+    expect(
+      health.health.anomalies.some(
+        (anomaly) => anomaly.code === "heartbeat_stale" && anomaly.severity === "error",
+      ),
+    ).toBe(true);
+    expect(health.health.issues.some((issue) => issue.startsWith("heartbeat_stale:"))).toBe(true);
   });
 
   it("ignores replayed recent failures once a later processed receipt exists", async () => {
@@ -646,6 +1057,7 @@ describe("interbeing watcher v0 hardening", () => {
         readRecentFailures: async () => [
           {
             action: "intake",
+            duration_ms: null,
             filename: "replayed.task-envelope.v0.json",
             reason_code: "dispatch_invalid",
             reason_detail: 'payload.local_dispatch has unexpected property "task_contract"',
@@ -657,8 +1069,9 @@ describe("interbeing watcher v0 hardening", () => {
     });
 
     expect(health.watcher.recent_failures).toHaveLength(0);
-    expect(health.health.status).toBe("ok");
+    expect(health.health.status).toBe("warning");
     expect(health.health.issues).not.toContain("recent_failures:1");
+    expect(health.health.issues).toContain("heartbeat_missing");
   });
 
   it("clears stale lock files left behind by dead processes", async () => {
