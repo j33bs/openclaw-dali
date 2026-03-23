@@ -46,6 +46,8 @@ REQUIRED_REPO_FILES = (
     Path("hooks/telegram-dali-bootstrap/HOOK.md"),
     Path("hooks/telegram-dali-bootstrap/handler.ts"),
     Path("nodes/dali/bootstrap/AGENTS.md"),
+    Path("nodes/dali/bootstrap/SOUL.md"),
+    Path("nodes/dali/bootstrap/TOOLS.md"),
     Path("nodes/dali/bootstrap/IDENTITY.md"),
     Path("nodes/dali/bootstrap/USER.md"),
     Path("nodes/dali/MEMORY.md"),

@@ -20,6 +20,8 @@ workspace with full tool/file access.
 Default compatibility layout:
 
 - `nodes/dali/bootstrap/AGENTS.md`
+- `nodes/dali/bootstrap/SOUL.md`
+- `nodes/dali/bootstrap/TOOLS.md`
 - `nodes/dali/bootstrap/IDENTITY.md`
 - `nodes/dali/bootstrap/USER.md`
 - `nodes/dali/MEMORY.md`
@@ -29,6 +31,8 @@ variables before the hook runs:
 
 - `OPENCLAW_DALI_BOOTSTRAP_ROOT`
 - `OPENCLAW_DALI_BOOTSTRAP_AGENTS_PATH`
+- `OPENCLAW_DALI_BOOTSTRAP_SOUL_PATH`
+- `OPENCLAW_DALI_BOOTSTRAP_TOOLS_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_IDENTITY_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_USER_PATH`
 - `OPENCLAW_DALI_BOOTSTRAP_MEMORY_PATH`
@@ -36,8 +40,10 @@ variables before the hook runs:
 Resolution order:
 
 1. File-specific env var for the requested file
-2. `OPENCLAW_DALI_BOOTSTRAP_ROOT` for `IDENTITY.md` and `USER.md`
+2. `OPENCLAW_DALI_BOOTSTRAP_ROOT` for `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, and `USER.md`
 3. Legacy default repo-relative path
 
 Relative override paths resolve from `workspace.dir`. Absolute paths are also
 accepted.
+
+`AGENTS.md` and `TOOLS.md` are appended so Dali keeps repo-root guidance plus Dali-specific execution overlays. `SOUL.md`, `IDENTITY.md`, `USER.md`, and `MEMORY.md` are replaced for the `telegram-dali` surface.

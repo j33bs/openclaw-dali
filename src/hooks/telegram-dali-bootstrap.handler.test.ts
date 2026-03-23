@@ -12,6 +12,16 @@ async function createBootstrapContext(workspaceDir: string): Promise<AgentBootst
     name: "AGENTS.md",
     content: "root agents",
   });
+  const rootSoul = await writeWorkspaceFile({
+    dir: workspaceDir,
+    name: "SOUL.md",
+    content: "root soul",
+  });
+  const rootTools = await writeWorkspaceFile({
+    dir: workspaceDir,
+    name: "TOOLS.md",
+    content: "root tools",
+  });
   const rootMemory = await writeWorkspaceFile({
     dir: workspaceDir,
     name: "MEMORY.md",
@@ -25,6 +35,18 @@ async function createBootstrapContext(workspaceDir: string): Promise<AgentBootst
         name: "AGENTS.md",
         path: rootAgents,
         content: "root agents",
+        missing: false,
+      },
+      {
+        name: "SOUL.md",
+        path: rootSoul,
+        content: "root soul",
+        missing: false,
+      },
+      {
+        name: "TOOLS.md",
+        path: rootTools,
+        content: "root tools",
         missing: false,
       },
       {
@@ -43,6 +65,8 @@ describe("telegram-dali-bootstrap hook", () => {
     const daliBootstrapDir = path.join(workspaceDir, "nodes", "dali", "bootstrap");
     await fs.mkdir(daliBootstrapDir, { recursive: true });
     await fs.writeFile(path.join(daliBootstrapDir, "AGENTS.md"), "dali agents", "utf-8");
+    await fs.writeFile(path.join(daliBootstrapDir, "SOUL.md"), "dali soul", "utf-8");
+    await fs.writeFile(path.join(daliBootstrapDir, "TOOLS.md"), "dali tools", "utf-8");
     await fs.writeFile(path.join(daliBootstrapDir, "IDENTITY.md"), "dali identity", "utf-8");
     await fs.writeFile(path.join(daliBootstrapDir, "USER.md"), "dali user", "utf-8");
     await fs.writeFile(
@@ -60,6 +84,15 @@ describe("telegram-dali-bootstrap hook", () => {
     expect(agentsFiles).toHaveLength(2);
     expect(agentsFiles.some((file) => file.content === "root agents")).toBe(true);
     expect(agentsFiles.some((file) => file.content === "dali agents")).toBe(true);
+
+    const soulFiles = context.bootstrapFiles.filter((file) => file.name === "SOUL.md");
+    expect(soulFiles).toHaveLength(1);
+    expect(soulFiles[0]?.content).toBe("dali soul");
+
+    const toolsFiles = context.bootstrapFiles.filter((file) => file.name === "TOOLS.md");
+    expect(toolsFiles).toHaveLength(2);
+    expect(toolsFiles.some((file) => file.content === "root tools")).toBe(true);
+    expect(toolsFiles.some((file) => file.content === "dali tools")).toBe(true);
 
     const memoryFiles = context.bootstrapFiles.filter((file) => file.name === "MEMORY.md");
     expect(memoryFiles).toHaveLength(1);

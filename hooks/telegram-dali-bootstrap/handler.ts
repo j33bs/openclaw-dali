@@ -5,13 +5,17 @@ const TARGET_AGENT_ID = "telegram-dali";
 const DEFAULT_BOOTSTRAP_ROOT = path.join("nodes", "dali", "bootstrap");
 const DEFAULT_OVERRIDES: Record<string, string> = {
   "AGENTS.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "AGENTS.md"),
+  "SOUL.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "SOUL.md"),
+  "TOOLS.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "TOOLS.md"),
   "IDENTITY.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "IDENTITY.md"),
   "USER.md": path.join(DEFAULT_BOOTSTRAP_ROOT, "USER.md"),
   "MEMORY.md": path.join("nodes", "dali", "MEMORY.md"),
 };
-const APPEND_ONLY_FILES = new Set(["AGENTS.md"]);
+const APPEND_ONLY_FILES = new Set(["AGENTS.md", "TOOLS.md"]);
 const OVERRIDE_ENV_NAMES: Record<string, string> = {
   "AGENTS.md": "OPENCLAW_DALI_BOOTSTRAP_AGENTS_PATH",
+  "SOUL.md": "OPENCLAW_DALI_BOOTSTRAP_SOUL_PATH",
+  "TOOLS.md": "OPENCLAW_DALI_BOOTSTRAP_TOOLS_PATH",
   "IDENTITY.md": "OPENCLAW_DALI_BOOTSTRAP_IDENTITY_PATH",
   "USER.md": "OPENCLAW_DALI_BOOTSTRAP_USER_PATH",
   "MEMORY.md": "OPENCLAW_DALI_BOOTSTRAP_MEMORY_PATH",
@@ -48,7 +52,14 @@ function resolveOverridePath(name: string): string | null {
   }
 
   const bootstrapRoot = readTrimmedEnv(BOOTSTRAP_ROOT_ENV_NAME);
-  if (bootstrapRoot && (name === "AGENTS.md" || name === "IDENTITY.md" || name === "USER.md")) {
+  if (
+    bootstrapRoot &&
+    (name === "AGENTS.md" ||
+      name === "SOUL.md" ||
+      name === "TOOLS.md" ||
+      name === "IDENTITY.md" ||
+      name === "USER.md")
+  ) {
     return path.join(bootstrapRoot, name);
   }
 
