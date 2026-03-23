@@ -69,6 +69,8 @@ class DaliRuntimeGuardTests(unittest.TestCase):
                 }
             ],
             "tools": {
+                "profile": "coding",
+                "exec": {"applyPatch": {"enabled": True}},
                 "web": {"search": {"enabled": True}, "fetch": {"enabled": True}},
             },
             "hooks": {
@@ -131,6 +133,24 @@ class DaliRuntimeGuardTests(unittest.TestCase):
         cfg["agents"]["list"][1]["memorySearch"]["sources"] = ["memory"]
         issues = self.mod.validate_openclaw_config(cfg)
         self.assertIn("telegram_agent_memory_sources_missing:sessions:memory", issues)
+
+    def test_messaging_tool_profile_fails(self):
+        cfg = self._good_config()
+        cfg["tools"]["profile"] = "messaging"
+        issues = self.mod.validate_openclaw_config(cfg)
+        self.assertIn("telegram_agent_tool_profile:messaging", issues)
+
+    def test_apply_patch_disabled_fails(self):
+        cfg = self._good_config()
+        cfg["tools"]["exec"]["applyPatch"]["enabled"] = False
+        issues = self.mod.validate_openclaw_config(cfg)
+        self.assertIn("telegram_agent_apply_patch:disabled", issues)
+
+    def test_denied_subagent_tool_fails(self):
+        cfg = self._good_config()
+        cfg["agents"]["list"][1]["tools"] = {"deny": ["sessions_spawn"]}
+        issues = self.mod.validate_openclaw_config(cfg)
+        self.assertIn("telegram_agent_tool_denied:sessions_spawn", issues)
 
     def test_disabled_internal_hook_fails(self):
         cfg = self._good_config()

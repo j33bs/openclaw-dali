@@ -25,6 +25,22 @@ REQUIRED_PROVIDER_ALLOWLIST = {
     "minimax-portal",
     "local_vllm",
 }
+DISALLOWED_TELEGRAM_TOOL_PROFILES = {"minimal", "messaging"}
+REQUIRED_TELEGRAM_TOOLS = {
+    "read",
+    "write",
+    "edit",
+    "apply_patch",
+    "exec",
+    "process",
+    "memory_search",
+    "memory_get",
+    "agents_list",
+    "sessions_send",
+    "sessions_spawn",
+    "sessions_yield",
+    "subagents",
+}
 REQUIRED_INTERNAL_HOOK = "telegram-dali-bootstrap"
 REQUIRED_REPO_FILES = (
     Path("hooks/telegram-dali-bootstrap/HOOK.md"),
@@ -81,6 +97,62 @@ def _resolve_telegram_memory_search(
             normalized_sources.append(item)
 
     return enabled, experimental_session_memory, normalized_sources or ["memory"]
+
+
+def _resolve_telegram_tooling(
+    cfg: Dict[str, object], agent_id: str
+) -> Tuple[Optional[str], bool, List[str]]:
+    tools_cfg = cfg.get("tools") if isinstance(cfg.get("tools"), dict) else None
+    agent = _agent_by_id(cfg, agent_id)
+    agent_tools = agent.get("tools") if isinstance(agent, dict) else None
+
+    profile: Optional[str] = None
+    apply_patch_enabled = False
+    deny: List[str] = []
+
+    def merge_deny(raw: object) -> None:
+        if not isinstance(raw, list):
+            return
+        for item in raw:
+            value = str(item).strip()
+            if value:
+                deny.append(value)
+
+    def merge_exec(raw_tools: object) -> None:
+        nonlocal apply_patch_enabled
+        if not isinstance(raw_tools, dict):
+            return
+        exec_cfg = raw_tools.get("exec")
+        if not isinstance(exec_cfg, dict):
+            return
+        apply_patch_cfg = exec_cfg.get("applyPatch")
+        if not isinstance(apply_patch_cfg, dict):
+            return
+        if isinstance(apply_patch_cfg.get("enabled"), bool):
+            apply_patch_enabled = apply_patch_cfg["enabled"]
+
+    if isinstance(tools_cfg, dict):
+        raw_profile = tools_cfg.get("profile")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            profile = raw_profile.strip()
+        merge_deny(tools_cfg.get("deny"))
+        merge_exec(tools_cfg)
+
+    if isinstance(agent_tools, dict):
+        raw_profile = agent_tools.get("profile")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            profile = raw_profile.strip()
+        merge_deny(agent_tools.get("deny"))
+        merge_exec(agent_tools)
+
+    normalized_deny = []
+    seen = set()
+    for item in deny:
+        if item not in seen:
+            seen.add(item)
+            normalized_deny.append(item)
+
+    return profile, apply_patch_enabled, normalized_deny
 
 
 def _repo_root() -> Path:
@@ -173,6 +245,18 @@ def validate_openclaw_config(cfg: Dict[str, object]) -> List[str]:
             issues.append(f"telegram_agent_memory_sources_missing:memory:{','.join(sources)}")
         if "sessions" not in sources:
             issues.append(f"telegram_agent_memory_sources_missing:sessions:{','.join(sources)}")
+
+        tool_profile, apply_patch_enabled, deny = _resolve_telegram_tooling(
+            cfg, TELEGRAM_AGENT_ID
+        )
+        if tool_profile in DISALLOWED_TELEGRAM_TOOL_PROFILES:
+            issues.append(f"telegram_agent_tool_profile:{tool_profile}")
+        if not apply_patch_enabled:
+            issues.append("telegram_agent_apply_patch:disabled")
+        denied = set(deny)
+        for tool_name in sorted(REQUIRED_TELEGRAM_TOOLS):
+            if tool_name in denied:
+                issues.append(f"telegram_agent_tool_denied:{tool_name}")
 
     has_binding = False
     for binding in _iter_route_bindings(cfg):
