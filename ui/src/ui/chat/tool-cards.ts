@@ -146,11 +146,63 @@ function coerceArgs(value: unknown): unknown {
 }
 
 function extractToolText(item: Record<string, unknown>): string | undefined {
-  if (typeof item.text === "string") {
-    return item.text;
-  }
-  if (typeof item.content === "string") {
-    return item.content;
+  const candidates = [item.text, item.content, item.data, item.result, item.output];
+  for (const value of candidates) {
+    const text = extractToolTextValue(value);
+    if (text) {
+      return text;
+    }
   }
   return undefined;
+}
+
+function extractToolTextValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => extractToolTextValue(entry))
+      .filter((entry): entry is string => Boolean(entry && entry.trim()));
+    return parts.length > 0 ? parts.join("\n\n") : stringifyToolOutput(value);
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.text === "string") {
+      return record.text;
+    }
+    if (typeof record.content === "string") {
+      return record.content;
+    }
+    for (const nested of [record.content, record.data, record.json, record.output, record.result]) {
+      const text = extractToolTextValue(nested);
+      if (text) {
+        return text;
+      }
+    }
+    return stringifyToolOutput(value);
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint" ||
+    typeof value === "symbol"
+  ) {
+    return String(value);
+  }
+  return undefined;
+}
+
+function stringifyToolOutput(value: unknown): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "[unserializable tool output]";
+  }
 }

@@ -6,6 +6,7 @@ import { i18n } from "../../i18n/index.ts";
 import { getSafeLocalStorage } from "../../local-storage.ts";
 import { renderChatSessionSelect } from "../app-render.helpers.ts";
 import type { AppViewState } from "../app-view-state.ts";
+import { extractToolCards } from "../chat/tool-cards.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type { ModelCatalogEntry } from "../types.ts";
 import type { SessionsListResult } from "../types.ts";
@@ -913,5 +914,56 @@ describe("chat view", () => {
       "Subagent: cron-config-check · subagent:6fb8b84b-c31f-410f-b7df-1553c82e43c9",
     );
     expect(labels).not.toContain("Subagent: cron-config-check");
+  });
+
+  it("keeps structured JSON tool results visible in tool cards", () => {
+    const cards = extractToolCards({
+      role: "assistant",
+      content: [
+        {
+          type: "toolresult",
+          name: "oracle",
+          data: {
+            answer: "Life is a self-sustaining chemical system capable of Darwinian evolution.",
+            source: {
+              title: "Life",
+              url: "https://grokipedia.com/page/Life",
+            },
+          },
+        },
+      ],
+    });
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: "result", name: "oracle" });
+    expect(cards[0]?.text).toContain('"answer"');
+    expect(cards[0]?.text).toContain("https://grokipedia.com/page/Life");
+  });
+
+  it("joins nested structured tool-result content blocks into one readable preview", () => {
+    const cards = extractToolCards({
+      role: "assistant",
+      content: [
+        {
+          type: "toolresult",
+          name: "oracle",
+          content: [
+            { type: "text", text: "Life is studied across biology and philosophy." },
+            {
+              type: "output_json",
+              data: {
+                title: "Life",
+                url: "https://grokipedia.com/page/Life",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.text).toContain("Life is studied across biology and philosophy.");
+    expect(cards[0]?.text).toContain('"title": "Life"');
+    expect(cards[0]?.text).toContain("https://grokipedia.com/page/Life");
   });
 });
