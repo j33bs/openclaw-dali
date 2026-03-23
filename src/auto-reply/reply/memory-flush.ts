@@ -17,9 +17,9 @@ const MEMORY_FLUSH_APPEND_ONLY_HINT =
 const MEMORY_FLUSH_READ_ONLY_HINT =
   "Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.";
 const MEMORY_FLUSH_STRUCTURE_HINT =
-  "When there is something durable to store, append a compact summary that covers: decisions/directives, concrete changes completed, bugs or blockers still open, important artifacts/paths/IDs, and next steps.";
+  "When there is something durable to store, append a compact summary that covers: standing requests/commitments or objectives, decisions/directives, concrete changes completed, bugs or blockers still open, important artifacts/paths/IDs, and next steps.";
 const MEMORY_FLUSH_SPECIFICITY_HINT =
-  "Prefer concrete operational facts over abstract themes so a future agent can resume work without rereading the full transcript.";
+  "Prefer concrete operational facts over abstract themes so a future agent can resume work without rereading the full transcript, including the user requests that still matter.";
 const MEMORY_FLUSH_COMPRESSION_HINT =
   "Do not dump the raw transcript; compress it into durable takeaways only.";
 const MEMORY_FLUSH_REQUIRED_HINTS = [

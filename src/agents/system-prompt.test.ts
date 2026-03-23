@@ -140,7 +140,7 @@ describe("buildAgentSystemPrompt", () => {
 
     expect(prompt).toContain("## Memory Recall");
     expect(prompt).toContain("Before answering or acting on anything about prior work");
-    expect(prompt).toContain("unfinished tasks, changes, bugs");
+    expect(prompt).toContain("unfinished tasks, standing requests, commitments, changes, bugs");
     expect(prompt).toContain("prioritize recent daily notes");
   });
 

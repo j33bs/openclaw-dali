@@ -63,11 +63,13 @@ describe("DEFAULT_MEMORY_FLUSH_PROMPT", () => {
   });
 
   it("requires compact operational summaries instead of vague transcript dumps", () => {
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("standing requests/commitments or objectives");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("decisions/directives");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("concrete changes completed");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("bugs or blockers still open");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("next steps");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("Prefer concrete operational facts");
+    expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("user requests that still matter");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("Do not dump the raw transcript");
   });
 });
