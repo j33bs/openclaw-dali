@@ -87,6 +87,15 @@ docs/.local/
 tmp/
 IDENTITY.md
 USER.md
+HEARTBEAT.md
+SOUL.md
+TOOLS.md
+.openclaw/
+handoff/
+workspace/state/
+workspace/audit/interbeing_emitter_v0.log
+workspace/audit/interbeing_watcher_v0.log
+workspace/audit/interbeing-watcher-v0/last-run/
 .tgz
 .idea
 
