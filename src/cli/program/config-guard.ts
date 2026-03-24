@@ -2,7 +2,7 @@ import { readConfigFileSnapshot } from "../../config/config.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { shouldMigrateStateFromPath } from "../argv.js";
 
-const ALLOWED_INVALID_COMMANDS = new Set(["doctor", "logs", "health", "help", "status"]);
+const ALLOWED_INVALID_COMMANDS = new Set(["doctor", "logs", "health", "help", "status", "update"]);
 const ALLOWED_INVALID_GATEWAY_SUBCOMMANDS = new Set([
   "status",
   "probe",

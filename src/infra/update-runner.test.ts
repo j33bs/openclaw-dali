@@ -269,6 +269,76 @@ describe("runGatewayUpdate", () => {
     expect(calls.some((call) => call.includes("rebase --abort"))).toBe(true);
   });
 
+  it("preserves the current tracked branch for dev updates when requested", async () => {
+    await setupGitCheckout();
+    await setupUiIndex();
+    const featureBranch = "codex/dali";
+    const featureUpstream = `origin/${featureBranch}`;
+    const doctorNodePath = await resolveStableNodePath(process.execPath);
+    const doctorKey = `${doctorNodePath} ${path.join(tempDir, "openclaw.mjs")} doctor --non-interactive --fix`;
+    const calls: string[] = [];
+
+    const runCommand = async (argv: string[]) => {
+      const key = argv.join(" ");
+      calls.push(key);
+
+      if (key === `git -C ${tempDir} rev-parse --show-toplevel`) {
+        return { stdout: tempDir, stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rev-parse HEAD`) {
+        return { stdout: "head123", stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rev-parse --abbrev-ref HEAD`) {
+        return { stdout: featureBranch, stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} status --porcelain -- :!dist/control-ui/`) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rev-parse --abbrev-ref --symbolic-full-name @{upstream}`) {
+        return { stdout: featureUpstream, stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} fetch --all --prune --tags`) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rev-parse @{upstream}`) {
+        return { stdout: "upstream123", stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rev-list --max-count=10 upstream123`) {
+        return { stdout: "upstream123\n", stderr: "", code: 0 };
+      }
+      if (key.includes("worktree add --detach")) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key.includes("checkout --detach upstream123")) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === "pnpm install" || key === "pnpm build" || key === "pnpm ui:build") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === "pnpm lint") {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === `git -C ${tempDir} rebase upstream123`) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      if (key === doctorKey) {
+        return { stdout: "", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+
+    const result = await withEnvAsync({ OPENCLAW_UPDATE_PRESERVE_BRANCH: "1" }, async () =>
+      runWithCommand(runCommand, { cwd: tempDir }),
+    );
+
+    expect(result.status).toBe("ok");
+    expect(calls).not.toContain(`git -C ${tempDir} checkout main`);
+    expect(calls).toContain(
+      `git -C ${tempDir} rev-parse --abbrev-ref --symbolic-full-name @{upstream}`,
+    );
+    expect(calls).toContain(`git -C ${tempDir} rebase upstream123`);
+  });
+
   it("returns error and stops early when deps install fails", async () => {
     await setupGitCheckout({ packageManager: "pnpm@8.0.0" });
     const stableTag = "v1.0.1-1";

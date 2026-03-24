@@ -710,13 +710,6 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     defaultRuntime.exit(1);
     return;
   }
-  if (opts.channel && !configSnapshot.valid) {
-    const issues = formatConfigIssueLines(configSnapshot.issues, "-");
-    defaultRuntime.error(["Config is invalid; cannot set update channel.", ...issues].join("\n"));
-    defaultRuntime.exit(1);
-    return;
-  }
-
   const installKind = updateStatus.installKind;
   const switchToGit = requestedChannel === "dev" && installKind !== "git";
   const switchToPackage =
@@ -858,6 +851,18 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
   if (updateInstallKind === "git" && opts.tag && !opts.json) {
     defaultRuntime.log(
       theme.muted("Note: --tag applies to npm installs only; git updates ignore it."),
+    );
+  }
+
+  if (requestedChannel && !configSnapshot.valid && !opts.json) {
+    const issues = formatConfigIssueLines(configSnapshot.issues, "-");
+    defaultRuntime.log(
+      theme.warn(
+        [
+          "Config is invalid; update.channel will not be persisted, but this update will continue.",
+          ...issues,
+        ].join("\n"),
+      ),
     );
   }
 

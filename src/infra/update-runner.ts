@@ -89,6 +89,7 @@ const PREFLIGHT_MAX_COMMITS = 10;
 const START_DIRS = ["cwd", "argv1", "process"];
 const DEFAULT_PACKAGE_NAME = "openclaw";
 const CORE_PACKAGE_NAMES = new Set([DEFAULT_PACKAGE_NAME]);
+const PRESERVE_BRANCH_ENV = "OPENCLAW_UPDATE_PRESERVE_BRANCH";
 
 function normalizeDir(value?: string | null) {
   if (!value) {
@@ -387,7 +388,14 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     const beforeVersion = await readPackageVersion(gitRoot);
     const channel: UpdateChannel = opts.channel ?? "dev";
     const branch = channel === "dev" ? await readBranchName(runCommand, gitRoot, timeoutMs) : null;
-    const needsCheckoutMain = channel === "dev" && branch !== DEV_BRANCH;
+    // Let service operators keep a tracked feature branch current without
+    // forcing the updater back onto main.
+    const preserveCurrentBranch =
+      channel === "dev" &&
+      process.env[PRESERVE_BRANCH_ENV] === "1" &&
+      branch != null &&
+      branch !== "HEAD";
+    const needsCheckoutMain = channel === "dev" && branch !== DEV_BRANCH && !preserveCurrentBranch;
     gitTotalSteps = channel === "dev" ? (needsCheckoutMain ? 11 : 10) : 9;
     const buildGitErrorResult = (reason: string): UpdateRunResult => ({
       status: "error",

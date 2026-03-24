@@ -523,6 +523,34 @@ describe("update-cli", () => {
     },
   );
 
+  it("continues one-off channel updates when config is invalid", async () => {
+    mockPackageInstallStatus(createCaseDir("openclaw-update"));
+    vi.mocked(readConfigFileSnapshot).mockResolvedValue({
+      ...baseSnapshot,
+      valid: false,
+      issues: [{ path: "plugins.allow", message: "plugin not found: minimax" }],
+    });
+    vi.mocked(resolveNpmChannelTag).mockResolvedValue({
+      tag: "beta",
+      version: "9999.0.0-beta.1",
+    });
+
+    await updateCommand({ channel: "beta", yes: true });
+
+    expect(writeConfigFile).not.toHaveBeenCalled();
+    expect(runCommandWithTimeout).toHaveBeenCalledWith(
+      ["npm", "i", "-g", "openclaw@beta", "--no-fund", "--no-audit", "--loglevel=error"],
+      expect.any(Object),
+    );
+    expect(defaultRuntime.exit).not.toHaveBeenCalled();
+    const logLines = vi.mocked(defaultRuntime.log).mock.calls.map((call) => String(call[0]));
+    expect(
+      logLines.some((line) =>
+        line.includes("Config is invalid; update.channel will not be persisted"),
+      ),
+    ).toBe(true);
+  });
+
   it("falls back to latest when beta tag is older than release", async () => {
     const tempDir = createCaseDir("openclaw-update");
 

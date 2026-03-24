@@ -112,6 +112,12 @@ describe("ensureConfigReady", () => {
 
     const gatewayRuntime = await runEnsureConfigReady(["gateway", "health"]);
     expect(gatewayRuntime.exit).not.toHaveBeenCalled();
+
+    const updateRuntime = await runEnsureConfigReady(["update"]);
+    expect(updateRuntime.exit).not.toHaveBeenCalled();
+
+    const updateStatusRuntime = await runEnsureConfigReady(["update", "status"]);
+    expect(updateStatusRuntime.exit).not.toHaveBeenCalled();
   });
 
   it("runs doctor migration flow only once per module instance", async () => {
