@@ -37,6 +37,7 @@ import {
   resolveMemoryFlushRelativePathForRun,
   resolveMemoryFlushPromptForRun,
   resolveMemoryFlushSettings,
+  shouldRunMissingDailyMemoryFlush,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
 import type { FollowupRun } from "./queue.js";
@@ -325,6 +326,17 @@ export async function runMemoryFlushIfNeeded(params: {
   let entry =
     params.sessionEntry ??
     (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+  const memoryFlushNowMs = Date.now();
+  const memoryFlushWritePath = resolveMemoryFlushRelativePathForRun({
+    cfg: params.cfg,
+    nowMs: memoryFlushNowMs,
+  });
+  const targetSnapshotBefore = canAttemptFlush
+    ? await readMemoryFlushTargetSnapshot({
+        workspaceDir: params.followupRun.run.workspaceDir,
+        relativePath: memoryFlushWritePath,
+      })
+    : { exists: false, size: 0 };
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
     modelId: params.followupRun.run.model ?? params.defaultModel,
     agentCfgContextTokens: params.agentCfgContextTokens,
@@ -374,14 +386,21 @@ export async function runMemoryFlushIfNeeded(params: {
     Number.isFinite(forceFlushTranscriptBytes) &&
     forceFlushTranscriptBytes > 0,
   );
-  const shouldReadSessionLog = shouldReadTranscript || shouldCheckTranscriptSizeForForcedFlush;
+  const shouldCheckTranscriptSizeForMissingDailyFlush = Boolean(
+    canAttemptFlush && entry && !targetSnapshotBefore.exists,
+  );
+  const shouldReadSessionLog =
+    shouldReadTranscript ||
+    shouldCheckTranscriptSizeForForcedFlush ||
+    shouldCheckTranscriptSizeForMissingDailyFlush;
   const sessionLogSnapshot = shouldReadSessionLog
     ? await readSessionLogSnapshot({
         sessionId: params.followupRun.run.sessionId,
         sessionEntry: entry,
         sessionKey: params.sessionKey ?? params.followupRun.run.sessionKey,
         opts: { storePath: params.storePath },
-        includeByteSize: shouldCheckTranscriptSizeForForcedFlush,
+        includeByteSize:
+          shouldCheckTranscriptSizeForForcedFlush || shouldCheckTranscriptSizeForMissingDailyFlush,
         includeUsage: shouldReadTranscript,
       })
     : undefined;
@@ -451,6 +470,29 @@ export async function runMemoryFlushIfNeeded(params: {
     projectedTokenCount > 0
       ? projectedTokenCount
       : undefined;
+  const shouldFlushBecauseMissingDailyNote =
+    canAttemptFlush &&
+    shouldRunMissingDailyMemoryFlush({
+      targetExists: targetSnapshotBefore.exists,
+      promptTokens: promptTokensSnapshot,
+      transcriptBytes: transcriptByteSize,
+    });
+  const shouldFlushBecauseThreshold =
+    memoryFlushSettings &&
+    memoryFlushWritable &&
+    !params.isHeartbeat &&
+    !isCli &&
+    shouldRunMemoryFlush({
+      entry,
+      tokenCount: tokenCountForFlush,
+      contextWindowTokens,
+      reserveTokensFloor: memoryFlushSettings.reserveTokensFloor,
+      softThresholdTokens: memoryFlushSettings.softThresholdTokens,
+    });
+  const shouldFlushBecauseTranscriptSize =
+    shouldForceFlushByTranscriptSize &&
+    entry != null &&
+    !hasAlreadyFlushedForCurrentCompaction(entry);
 
   // Diagnostic logging to understand why memory flush may not trigger.
   logVerbose(
@@ -462,31 +504,29 @@ export async function runMemoryFlushIfNeeded(params: {
       `persistedPromptTokens=${persistedPromptTokens ?? "undefined"} persistedFresh=${entry?.totalTokensFresh === true} ` +
       `promptTokensEst=${promptTokenEstimate ?? "undefined"} transcriptPromptTokens=${transcriptPromptTokens ?? "undefined"} transcriptOutputTokens=${transcriptOutputTokens ?? "undefined"} ` +
       `projectedTokenCount=${projectedTokenCount ?? "undefined"} transcriptBytes=${transcriptByteSize ?? "undefined"} ` +
-      `forceFlushTranscriptBytes=${forceFlushTranscriptBytes} forceFlushByTranscriptSize=${shouldForceFlushByTranscriptSize}`,
+      `forceFlushTranscriptBytes=${forceFlushTranscriptBytes} forceFlushByTranscriptSize=${shouldForceFlushByTranscriptSize} ` +
+      `targetExists=${targetSnapshotBefore.exists} flushBecauseThreshold=${shouldFlushBecauseThreshold} ` +
+      `flushBecauseTranscriptSize=${shouldFlushBecauseTranscriptSize} flushBecauseMissingDailyNote=${shouldFlushBecauseMissingDailyNote}`,
   );
 
   const shouldFlushMemory =
-    (memoryFlushSettings &&
-      memoryFlushWritable &&
-      !params.isHeartbeat &&
-      !isCli &&
-      shouldRunMemoryFlush({
-        entry,
-        tokenCount: tokenCountForFlush,
-        contextWindowTokens,
-        reserveTokensFloor: memoryFlushSettings.reserveTokensFloor,
-        softThresholdTokens: memoryFlushSettings.softThresholdTokens,
-      })) ||
-    (shouldForceFlushByTranscriptSize &&
-      entry != null &&
-      !hasAlreadyFlushedForCurrentCompaction(entry));
+    shouldFlushBecauseThreshold ||
+    shouldFlushBecauseTranscriptSize ||
+    shouldFlushBecauseMissingDailyNote;
 
   if (!shouldFlushMemory) {
     return entry ?? params.sessionEntry;
   }
 
+  const flushReasons = [
+    shouldFlushBecauseThreshold ? "near-threshold" : "",
+    shouldFlushBecauseTranscriptSize ? "transcript-bytes" : "",
+    shouldFlushBecauseMissingDailyNote ? "missing-daily-note" : "",
+  ]
+    .filter(Boolean)
+    .join(",");
   logVerbose(
-    `memoryFlush triggered: sessionKey=${params.sessionKey} tokenCount=${tokenCountForFlush ?? "undefined"} threshold=${flushThreshold}`,
+    `memoryFlush triggered: sessionKey=${params.sessionKey} tokenCount=${tokenCountForFlush ?? "undefined"} threshold=${flushThreshold} reasons=${flushReasons || "unknown"}`,
   );
 
   let activeSessionEntry = entry ?? params.sessionEntry;
@@ -503,21 +543,12 @@ export async function runMemoryFlushIfNeeded(params: {
     });
   }
   let memoryCompactionCompleted = false;
-  const memoryFlushNowMs = Date.now();
-  const memoryFlushWritePath = resolveMemoryFlushRelativePathForRun({
-    cfg: params.cfg,
-    nowMs: memoryFlushNowMs,
-  });
   const flushSystemPrompt = [
     params.followupRun.run.extraSystemPrompt,
     memoryFlushSettings.systemPrompt,
   ]
     .filter(Boolean)
     .join("\n\n");
-  const targetSnapshotBefore = await readMemoryFlushTargetSnapshot({
-    workspaceDir: params.followupRun.run.workspaceDir,
-    relativePath: memoryFlushWritePath,
-  });
   try {
     await runWithModelFallback({
       ...resolveModelFallbackOptions(params.followupRun.run),

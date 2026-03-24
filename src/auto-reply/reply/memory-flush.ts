@@ -9,6 +9,8 @@ import { SILENT_REPLY_TOKEN } from "../tokens.js";
 
 export const DEFAULT_MEMORY_FLUSH_SOFT_TOKENS = 4000;
 export const DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS = 2000;
+export const DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES = 16 * 1024;
 
 const MEMORY_FLUSH_TARGET_HINT =
   "Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).";
@@ -17,9 +19,9 @@ const MEMORY_FLUSH_APPEND_ONLY_HINT =
 const MEMORY_FLUSH_READ_ONLY_HINT =
   "Treat workspace bootstrap/reference files such as MEMORY.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.";
 const MEMORY_FLUSH_STRUCTURE_HINT =
-  "When there is something durable to store, append a compact summary that covers: standing requests/commitments or objectives, decisions/directives, concrete changes completed, bugs or blockers still open, important artifacts/paths/IDs, and next steps.";
+  "When there is something durable to store, append a compact summary that covers: standing requests/commitments or objectives, decisions/directives, concrete changes completed, bugs or blockers still open, important artifacts/paths/IDs, validation or receipts (tests run, commits, deploy/restart outcomes), and next steps.";
 const MEMORY_FLUSH_SPECIFICITY_HINT =
-  "Prefer concrete operational facts over abstract themes so a future agent can resume work without rereading the full transcript, including the user requests that still matter.";
+  "Prefer concrete operational facts over abstract themes so a future agent can resume work without rereading the full transcript, including recent multi-hour operational work, touched components/files, and the user requests that still matter.";
 const MEMORY_FLUSH_COMPRESSION_HINT =
   "Do not dump the raw transcript; compress it into durable takeaways only.";
 const MEMORY_FLUSH_REQUIRED_HINTS = [
@@ -227,6 +229,42 @@ export function shouldRunMemoryFlush(params: {
   }
 
   return true;
+}
+
+export function shouldRunMissingDailyMemoryFlush(params: {
+  targetExists: boolean;
+  promptTokens?: number;
+  transcriptBytes?: number;
+  minPromptTokens?: number;
+  minTranscriptBytes?: number;
+}): boolean {
+  if (params.targetExists) {
+    return false;
+  }
+
+  const promptTokens =
+    typeof params.promptTokens === "number" &&
+    Number.isFinite(params.promptTokens) &&
+    params.promptTokens > 0
+      ? Math.floor(params.promptTokens)
+      : undefined;
+  const transcriptBytes =
+    typeof params.transcriptBytes === "number" &&
+    Number.isFinite(params.transcriptBytes) &&
+    params.transcriptBytes > 0
+      ? Math.floor(params.transcriptBytes)
+      : undefined;
+  const minPromptTokens =
+    normalizeNonNegativeInt(params.minPromptTokens) ??
+    DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS;
+  const minTranscriptBytes =
+    normalizeNonNegativeInt(params.minTranscriptBytes) ??
+    DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES;
+
+  return (
+    (typeof promptTokens === "number" && promptTokens >= minPromptTokens) ||
+    (typeof transcriptBytes === "number" && transcriptBytes >= minTranscriptBytes)
+  );
 }
 
 /**

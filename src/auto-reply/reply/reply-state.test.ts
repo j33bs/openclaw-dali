@@ -15,11 +15,14 @@ import {
   recordPendingHistoryEntryIfEnabled,
 } from "./history.js";
 import {
+  DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS,
+  DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES,
   DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES,
   DEFAULT_MEMORY_FLUSH_SOFT_TOKENS,
   hasAlreadyFlushedForCurrentCompaction,
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
+  shouldRunMissingDailyMemoryFlush,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
 import { CURRENT_MESSAGE_MARKER } from "./mentions.js";
@@ -354,6 +357,46 @@ describe("shouldRunMemoryFlush", () => {
         contextWindowTokens: 100_000,
         reserveTokensFloor: 5_000,
         softThresholdTokens: 2_000,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldRunMissingDailyMemoryFlush", () => {
+  it("skips when today's canonical note already exists", () => {
+    expect(
+      shouldRunMissingDailyMemoryFlush({
+        targetExists: true,
+        promptTokens: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS * 2,
+        transcriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES * 2,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs when prompt-token history is substantial and today's note is missing", () => {
+    expect(
+      shouldRunMissingDailyMemoryFlush({
+        targetExists: false,
+        promptTokens: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS,
+      }),
+    ).toBe(true);
+  });
+
+  it("runs when transcript bytes are substantial and today's note is missing", () => {
+    expect(
+      shouldRunMissingDailyMemoryFlush({
+        targetExists: false,
+        transcriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES,
+      }),
+    ).toBe(true);
+  });
+
+  it("skips tiny sessions when today's note is missing", () => {
+    expect(
+      shouldRunMissingDailyMemoryFlush({
+        targetExists: false,
+        promptTokens: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS - 1,
+        transcriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES - 1,
       }),
     ).toBe(false);
   });
