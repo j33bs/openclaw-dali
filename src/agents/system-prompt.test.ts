@@ -143,7 +143,9 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("unfinished tasks, standing requests, commitments, changes, bugs");
     expect(prompt).toContain("recent session memory");
     expect(prompt).toContain("Use memory_get only for file-backed notes");
-    expect(prompt).toContain("search recent session receipts before claiming weak recall");
+    expect(prompt).toContain(
+      "search recent session receipts when available before claiming weak recall",
+    );
   });
 
   it("includes skills in minimal prompt mode when skillsPrompt is provided (cron regression)", () => {

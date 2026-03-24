@@ -536,7 +536,7 @@ async function createMaintenanceScenario(workspaceDir: string): Promise<PromptSc
     workspaceDir,
     extraSystemPrompt: [
       "Pre-compaction memory flush turn.",
-      "The session is near auto-compaction; capture durable memories to disk.",
+      "Capture durable memories to disk when the session is near auto-compaction or recent operational work should be promoted into durable notes.",
       "Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).",
       "You may reply, but usually NO_REPLY is correct.",
     ].join(" "),

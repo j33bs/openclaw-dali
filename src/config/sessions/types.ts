@@ -153,6 +153,8 @@ export type SessionEntry = {
   compactionCount?: number;
   memoryFlushAt?: number;
   memoryFlushCompactionCount?: number;
+  memoryFlushPromptTokens?: number;
+  memoryFlushTranscriptBytes?: number;
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;

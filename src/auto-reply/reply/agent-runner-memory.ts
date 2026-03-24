@@ -37,6 +37,7 @@ import {
   resolveMemoryFlushRelativePathForRun,
   resolveMemoryFlushPromptForRun,
   resolveMemoryFlushSettings,
+  shouldRunIncrementalDailyMemoryFlush,
   shouldRunMissingDailyMemoryFlush,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
@@ -389,10 +390,14 @@ export async function runMemoryFlushIfNeeded(params: {
   const shouldCheckTranscriptSizeForMissingDailyFlush = Boolean(
     canAttemptFlush && entry && !targetSnapshotBefore.exists,
   );
+  const shouldCheckTranscriptSizeForIncrementalFlush = Boolean(
+    canAttemptFlush && entry && targetSnapshotBefore.exists,
+  );
   const shouldReadSessionLog =
     shouldReadTranscript ||
     shouldCheckTranscriptSizeForForcedFlush ||
-    shouldCheckTranscriptSizeForMissingDailyFlush;
+    shouldCheckTranscriptSizeForMissingDailyFlush ||
+    shouldCheckTranscriptSizeForIncrementalFlush;
   const sessionLogSnapshot = shouldReadSessionLog
     ? await readSessionLogSnapshot({
         sessionId: params.followupRun.run.sessionId,
@@ -400,7 +405,9 @@ export async function runMemoryFlushIfNeeded(params: {
         sessionKey: params.sessionKey ?? params.followupRun.run.sessionKey,
         opts: { storePath: params.storePath },
         includeByteSize:
-          shouldCheckTranscriptSizeForForcedFlush || shouldCheckTranscriptSizeForMissingDailyFlush,
+          shouldCheckTranscriptSizeForForcedFlush ||
+          shouldCheckTranscriptSizeForMissingDailyFlush ||
+          shouldCheckTranscriptSizeForIncrementalFlush,
         includeUsage: shouldReadTranscript,
       })
     : undefined;
@@ -477,6 +484,15 @@ export async function runMemoryFlushIfNeeded(params: {
       promptTokens: promptTokensSnapshot,
       transcriptBytes: transcriptByteSize,
     });
+  const shouldFlushBecauseIncrementalDailyNote =
+    canAttemptFlush &&
+    shouldRunIncrementalDailyMemoryFlush({
+      targetExists: targetSnapshotBefore.exists,
+      promptTokens: promptTokensSnapshot,
+      transcriptBytes: transcriptByteSize,
+      lastFlushedPromptTokens: entry?.memoryFlushPromptTokens,
+      lastFlushedTranscriptBytes: entry?.memoryFlushTranscriptBytes,
+    });
   const shouldFlushBecauseThreshold =
     memoryFlushSettings &&
     memoryFlushWritable &&
@@ -506,13 +522,16 @@ export async function runMemoryFlushIfNeeded(params: {
       `projectedTokenCount=${projectedTokenCount ?? "undefined"} transcriptBytes=${transcriptByteSize ?? "undefined"} ` +
       `forceFlushTranscriptBytes=${forceFlushTranscriptBytes} forceFlushByTranscriptSize=${shouldForceFlushByTranscriptSize} ` +
       `targetExists=${targetSnapshotBefore.exists} flushBecauseThreshold=${shouldFlushBecauseThreshold} ` +
-      `flushBecauseTranscriptSize=${shouldFlushBecauseTranscriptSize} flushBecauseMissingDailyNote=${shouldFlushBecauseMissingDailyNote}`,
+      `flushBecauseTranscriptSize=${shouldFlushBecauseTranscriptSize} flushBecauseMissingDailyNote=${shouldFlushBecauseMissingDailyNote} ` +
+      `flushBecauseIncrementalDailyNote=${shouldFlushBecauseIncrementalDailyNote} lastFlushedPromptTokens=${entry?.memoryFlushPromptTokens ?? "undefined"} ` +
+      `lastFlushedTranscriptBytes=${entry?.memoryFlushTranscriptBytes ?? "undefined"}`,
   );
 
   const shouldFlushMemory =
     shouldFlushBecauseThreshold ||
     shouldFlushBecauseTranscriptSize ||
-    shouldFlushBecauseMissingDailyNote;
+    shouldFlushBecauseMissingDailyNote ||
+    shouldFlushBecauseIncrementalDailyNote;
 
   if (!shouldFlushMemory) {
     return entry ?? params.sessionEntry;
@@ -522,6 +541,7 @@ export async function runMemoryFlushIfNeeded(params: {
     shouldFlushBecauseThreshold ? "near-threshold" : "",
     shouldFlushBecauseTranscriptSize ? "transcript-bytes" : "",
     shouldFlushBecauseMissingDailyNote ? "missing-daily-note" : "",
+    shouldFlushBecauseIncrementalDailyNote ? "incremental-daily-note" : "",
   ]
     .filter(Boolean)
     .join(",");
@@ -625,15 +645,42 @@ export async function runMemoryFlushIfNeeded(params: {
         `memory flush completed without appending durable memory: sessionKey=${params.sessionKey} target=${memoryFlushWritePath}`,
       );
     }
+    if (wroteDurableMemory) {
+      const memoryFlushMetadata = {
+        memoryFlushAt: Date.now(),
+        memoryFlushCompactionCount,
+        memoryFlushPromptTokens:
+          promptTokensSnapshot > 0 ? Math.floor(promptTokensSnapshot) : undefined,
+        memoryFlushTranscriptBytes:
+          typeof transcriptByteSize === "number" && Number.isFinite(transcriptByteSize)
+            ? Math.floor(transcriptByteSize)
+            : undefined,
+      };
+      if (activeSessionEntry) {
+        activeSessionEntry = { ...activeSessionEntry, ...memoryFlushMetadata };
+      }
+      if (params.sessionKey && activeSessionStore && activeSessionEntry) {
+        activeSessionStore[params.sessionKey] = activeSessionEntry;
+      }
+    }
     if (wroteDurableMemory && params.storePath && params.sessionKey) {
       try {
         const updatedEntry = await updateSessionStoreEntry({
           storePath: params.storePath,
           sessionKey: params.sessionKey,
-          update: async () => ({
-            memoryFlushAt: Date.now(),
-            memoryFlushCompactionCount,
-          }),
+          update: async () => {
+            const next: Record<string, number | undefined> = {
+              memoryFlushAt: Date.now(),
+              memoryFlushCompactionCount,
+              memoryFlushPromptTokens:
+                promptTokensSnapshot > 0 ? Math.floor(promptTokensSnapshot) : undefined,
+              memoryFlushTranscriptBytes:
+                typeof transcriptByteSize === "number" && Number.isFinite(transcriptByteSize)
+                  ? Math.floor(transcriptByteSize)
+                  : undefined,
+            };
+            return next;
+          },
         });
         if (updatedEntry) {
           activeSessionEntry = updatedEntry;

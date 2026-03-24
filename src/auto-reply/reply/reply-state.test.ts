@@ -15,6 +15,8 @@ import {
   recordPendingHistoryEntryIfEnabled,
 } from "./history.js";
 import {
+  DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA,
+  DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA,
   DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS,
   DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES,
   DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES,
@@ -22,6 +24,7 @@ import {
   hasAlreadyFlushedForCurrentCompaction,
   resolveMemoryFlushContextWindowTokens,
   resolveMemoryFlushSettings,
+  shouldRunIncrementalDailyMemoryFlush,
   shouldRunMissingDailyMemoryFlush,
   shouldRunMemoryFlush,
 } from "./memory-flush.js";
@@ -399,6 +402,72 @@ describe("shouldRunMissingDailyMemoryFlush", () => {
         transcriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES - 1,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldRunIncrementalDailyMemoryFlush", () => {
+  it("skips when today's note does not exist yet", () => {
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: false,
+        promptTokens:
+          DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS +
+          DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA,
+        transcriptBytes:
+          DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES +
+          DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA,
+        lastFlushedPromptTokens: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS,
+        lastFlushedTranscriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs when prompt tokens have advanced enough since the last durable write", () => {
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: true,
+        promptTokens: 9_000,
+        lastFlushedPromptTokens: 9_000 - DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA,
+      }),
+    ).toBe(true);
+  });
+
+  it("runs when transcript bytes have advanced enough since the last durable write", () => {
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: true,
+        transcriptBytes: 48_000,
+        lastFlushedTranscriptBytes: 48_000 - DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA,
+      }),
+    ).toBe(true);
+  });
+
+  it("skips when the session has not advanced enough since the last durable write", () => {
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: true,
+        promptTokens: 5_000,
+        transcriptBytes: 32_000,
+        lastFlushedPromptTokens: 5_000 - DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA + 1,
+        lastFlushedTranscriptBytes:
+          32_000 - DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA + 1,
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to absolute thresholds when today's note exists but no per-session flush baseline was recorded", () => {
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: true,
+        promptTokens: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunIncrementalDailyMemoryFlush({
+        targetExists: true,
+        transcriptBytes: DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES,
+      }),
+    ).toBe(true);
   });
 });
 

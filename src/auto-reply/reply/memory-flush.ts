@@ -11,6 +11,8 @@ export const DEFAULT_MEMORY_FLUSH_SOFT_TOKENS = 4000;
 export const DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_PROMPT_TOKENS = 2000;
 export const DEFAULT_MEMORY_FLUSH_MISSING_DAILY_NOTE_MIN_TRANSCRIPT_BYTES = 16 * 1024;
+export const DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA = 1000;
+export const DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA = 8 * 1024;
 
 const MEMORY_FLUSH_TARGET_HINT =
   "Store durable memories only in memory/YYYY-MM-DD.md (create memory/ if needed).";
@@ -47,7 +49,7 @@ export const DEFAULT_MEMORY_FLUSH_PROMPT = [
 
 export const DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT = [
   "Pre-compaction memory flush turn.",
-  "The session is near auto-compaction; capture durable memories to disk.",
+  "Capture durable memories to disk when the session is near auto-compaction or recent operational work should be promoted into durable notes.",
   MEMORY_FLUSH_TARGET_HINT,
   MEMORY_FLUSH_READ_ONLY_HINT,
   MEMORY_FLUSH_APPEND_ONLY_HINT,
@@ -265,6 +267,84 @@ export function shouldRunMissingDailyMemoryFlush(params: {
     (typeof promptTokens === "number" && promptTokens >= minPromptTokens) ||
     (typeof transcriptBytes === "number" && transcriptBytes >= minTranscriptBytes)
   );
+}
+
+export function shouldRunIncrementalDailyMemoryFlush(params: {
+  targetExists: boolean;
+  promptTokens?: number;
+  transcriptBytes?: number;
+  lastFlushedPromptTokens?: number;
+  lastFlushedTranscriptBytes?: number;
+  minPromptTokenDelta?: number;
+  minTranscriptByteDelta?: number;
+  fallbackPromptTokens?: number;
+  fallbackTranscriptBytes?: number;
+}): boolean {
+  if (!params.targetExists) {
+    return false;
+  }
+
+  const promptTokens =
+    typeof params.promptTokens === "number" &&
+    Number.isFinite(params.promptTokens) &&
+    params.promptTokens > 0
+      ? Math.floor(params.promptTokens)
+      : undefined;
+  const transcriptBytes =
+    typeof params.transcriptBytes === "number" &&
+    Number.isFinite(params.transcriptBytes) &&
+    params.transcriptBytes > 0
+      ? Math.floor(params.transcriptBytes)
+      : undefined;
+  const lastFlushedPromptTokens =
+    typeof params.lastFlushedPromptTokens === "number" &&
+    Number.isFinite(params.lastFlushedPromptTokens) &&
+    params.lastFlushedPromptTokens > 0
+      ? Math.floor(params.lastFlushedPromptTokens)
+      : undefined;
+  const lastFlushedTranscriptBytes =
+    typeof params.lastFlushedTranscriptBytes === "number" &&
+    Number.isFinite(params.lastFlushedTranscriptBytes) &&
+    params.lastFlushedTranscriptBytes > 0
+      ? Math.floor(params.lastFlushedTranscriptBytes)
+      : undefined;
+
+  const minPromptTokenDelta =
+    normalizeNonNegativeInt(params.minPromptTokenDelta) ??
+    DEFAULT_MEMORY_FLUSH_INCREMENTAL_PROMPT_TOKEN_DELTA;
+  const minTranscriptByteDelta =
+    normalizeNonNegativeInt(params.minTranscriptByteDelta) ??
+    DEFAULT_MEMORY_FLUSH_INCREMENTAL_TRANSCRIPT_BYTE_DELTA;
+
+  const promptTokenDelta =
+    typeof promptTokens === "number" && typeof lastFlushedPromptTokens === "number"
+      ? promptTokens - lastFlushedPromptTokens
+      : undefined;
+  const transcriptByteDelta =
+    typeof transcriptBytes === "number" && typeof lastFlushedTranscriptBytes === "number"
+      ? transcriptBytes - lastFlushedTranscriptBytes
+      : undefined;
+
+  if (
+    (typeof promptTokenDelta === "number" && promptTokenDelta >= minPromptTokenDelta) ||
+    (typeof transcriptByteDelta === "number" && transcriptByteDelta >= minTranscriptByteDelta)
+  ) {
+    return true;
+  }
+
+  const hasFlushProgressBaseline =
+    typeof lastFlushedPromptTokens === "number" || typeof lastFlushedTranscriptBytes === "number";
+  if (hasFlushProgressBaseline) {
+    return false;
+  }
+
+  return shouldRunMissingDailyMemoryFlush({
+    targetExists: false,
+    promptTokens,
+    transcriptBytes,
+    minPromptTokens: params.fallbackPromptTokens,
+    minTranscriptBytes: params.fallbackTranscriptBytes,
+  });
 }
 
 /**
