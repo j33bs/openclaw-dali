@@ -126,6 +126,56 @@ function listBundledPluginBuildEntries(): Record<string, string> {
 
 const bundledPluginBuildEntries = listBundledPluginBuildEntries();
 
+function walkFiles(dir: string): string[] {
+  const entries: string[] = [];
+  for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, dirent.name);
+    if (dirent.isDirectory()) {
+      entries.push(...walkFiles(fullPath));
+      continue;
+    }
+    if (dirent.isFile()) {
+      entries.push(fullPath);
+    }
+  }
+  return entries;
+}
+
+function buildRuntimeBoundaryEntries(): Record<string, string> {
+  const repoRoot = process.cwd();
+  const entries: Record<string, string> = {};
+  const candidateRoots = [path.join(repoRoot, "src"), path.join(repoRoot, "extensions")];
+
+  for (const root of candidateRoots) {
+    if (!fs.existsSync(root)) {
+      continue;
+    }
+
+    for (const fullPath of walkFiles(root)) {
+      if (!fullPath.endsWith(".runtime.ts")) {
+        continue;
+      }
+
+      const relPath = path.relative(repoRoot, fullPath).split(path.sep).join("/");
+      if (relPath.startsWith("src/")) {
+        const entryKey = relPath.slice("src/".length).replace(/\.ts$/u, "");
+        entries[entryKey] = relPath;
+        continue;
+      }
+
+      const extensionMatch = relPath.match(/^extensions\/([^/]+)\/src\/(.+)\.ts$/u);
+      if (extensionMatch) {
+        const [, extensionName, entryPath] = extensionMatch;
+        entries[`extensions/${extensionName}/${entryPath}`] = relPath;
+      }
+    }
+  }
+
+  return entries;
+}
+
+const runtimeBoundaryEntries = buildRuntimeBoundaryEntries();
+
 function buildBundledHookEntries(): Record<string, string> {
   const hooksRoot = path.join(process.cwd(), "src", "hooks", "bundled");
   const entries: Record<string, string> = {};
@@ -182,6 +232,9 @@ const coreDistEntries = buildCoreDistEntries();
 function buildUnifiedDistEntries(): Record<string, string> {
   return {
     ...coreDistEntries,
+    // Keep dedicated lazy runtime boundaries at stable dist paths so long-lived
+    // gateway processes do not crash on hashed chunk misses after a rebuild.
+    ...runtimeBoundaryEntries,
     ...Object.fromEntries(
       Object.entries(buildPluginSdkEntrySources()).map(([entry, source]) => [
         `plugin-sdk/${entry}`,

@@ -35,10 +35,32 @@ describe("tsdown config", () => {
     expect(entryKeys(distGraphs[0])).toEqual(
       expect.arrayContaining([
         "index",
+        "agents/auth-profiles.runtime",
+        "plugins/provider-runtime.runtime",
+        "extensions/telegram/media-understanding.runtime",
         "plugins/runtime/index",
         "plugin-sdk/index",
         "extensions/openai/index",
         "bundled/boot-md/handler",
+      ]),
+    );
+  });
+
+  it("emits dedicated runtime boundaries as stable dist entries", () => {
+    const configs = asConfigArray(tsdownConfig);
+    const distGraph = configs.find((config) => entryKeys(config).includes("index"));
+
+    expect(distGraph).toBeDefined();
+    expect(entryKeys(distGraph!)).toEqual(
+      expect.arrayContaining([
+        "agents/auth-profiles.runtime",
+        "agents/pi-embedded-runner/compact.runtime",
+        "channels/read-only-account-inspect.telegram.runtime",
+        "commands/model-picker.runtime",
+        "plugins/provider-runtime.runtime",
+        "plugins/runtime/runtime-telegram-ops.runtime",
+        "extensions/telegram/media-understanding.runtime",
+        "extensions/slack/monitor/slash-commands.runtime",
       ]),
     );
   });
