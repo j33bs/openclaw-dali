@@ -64,6 +64,15 @@ function applyResolvedConfig(
   }
 }
 
+function readResolvedBrowserConfigSnapshot(mode: "cached" | "fresh") {
+  if (mode === "fresh") {
+    // Bypass the process-level runtime snapshot for targeted fallback reads.
+    // This keeps the retry path aligned with "read from disk now" behavior.
+    return createConfigIO().loadConfig();
+  }
+  return getRuntimeConfigSnapshot() ?? createConfigIO().loadConfig();
+}
+
 export function refreshResolvedBrowserConfigFromDisk(params: {
   current: BrowserServerState;
   refreshConfigFromDisk: boolean;
@@ -74,9 +83,9 @@ export function refreshResolvedBrowserConfigFromDisk(params: {
   }
 
   // Route-level browser config hot reload should observe on-disk changes immediately.
-  // The shared loadConfig() helper may return a cached snapshot for the configured TTL,
-  // which can leave request-time browser guards stale (for example evaluateEnabled).
-  const cfg = getRuntimeConfigSnapshot() ?? createConfigIO().loadConfig();
+  // Cached reads prefer the active runtime snapshot when one exists, while the
+  // explicit "fresh" retry path bypasses it and re-reads the config from disk.
+  const cfg = readResolvedBrowserConfigSnapshot(params.mode);
   const freshResolved = resolveBrowserConfig(cfg.browser, cfg);
   applyResolvedConfig(params.current, freshResolved);
 }
