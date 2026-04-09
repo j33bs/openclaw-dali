@@ -296,6 +296,22 @@ Requires `gemini-embedding-2-preview`. `fallback` must be `"none"`.
 Supported formats: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.heic`, `.heif`
 (images); `.mp3`, `.wav`, `.ogg`, `.opus`, `.m4a`, `.aac`, `.flac` (audio).
 
+Practical guidance:
+
+- Multimodal memory is a retrieval feature, not a live captioning feature.
+- It still helps when your active reply model is text-only or when Claude
+  vision is unavailable, because indexing runs through the configured memory
+  embedding provider rather than the reply model.
+- A useful fallback stack is to keep multimodal memory enabled for screenshots,
+  diagrams, and voice notes in `extraPaths`, then pair it with live media
+  understanding through `tools.media.image.models`,
+  `agents.defaults.imageModel.fallbacks`, or a local `gemini` CLI fallback.
+- This lets OpenClaw recall older visual context from memory even when the
+  current turn has to route through a different provider or local vision path.
+
+See [Media Understanding](/nodes/media-understanding) for current-turn image,
+audio, and video fallback behavior.
+
 ---
 
 ## Embedding cache

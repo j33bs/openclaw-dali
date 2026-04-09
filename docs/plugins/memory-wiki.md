@@ -134,6 +134,63 @@ Evidence entries can include:
 This is what makes the wiki act more like a belief layer than a passive note
 dump. Claims can be tracked, scored, contested, and resolved back to sources.
 
+### Provenance convention for extracted vs inferred claims
+
+`memory-wiki` already gives you the pieces to keep direct evidence separate from
+later synthesis.
+
+A practical pattern is:
+
+- keep the `claim.text` field close to the durable fact you want to reuse
+- use `evidence.note` to label whether support is `extracted:` or `inferred:`
+- point every inferred claim back to the exact source pages or line ranges that
+  justify the synthesis
+- lower `confidence` or mark the claim for review when the evidence is indirect
+
+Example:
+
+```yaml
+claims:
+  - id: atlas.deploy-approver
+    text: Nora owns Atlas deploy approvals.
+    status: active
+    confidence: 0.78
+    updatedAt: 2026-04-09
+    evidence:
+      - sourceId: source.deploy-runbook
+        lines: 12-18
+        note: "extracted: runbook names Nora as the approver for production deploys"
+      - sourceId: source.incident-2026-04-02
+        lines: 40-47
+        note: "inferred: incident notes show Atlas deploys still route through the same approval path"
+```
+
+That keeps direct quotes and later reasoning visible without inventing a second
+schema just for provenance tiers.
+
+### Relationship-oriented pages and queries
+
+When you want a graph-like knowledge surface, prefer explicit relationship
+claims over vague paragraph summaries.
+
+Good relationship claims usually read like simple subject-verb-object facts:
+
+- `Atlas service depends on Postgres for durable state.`
+- `Nora owns Atlas deploy approvals.`
+- `Billing alerts page the on-call SRE rotation.`
+
+This pays off in three places:
+
+- `wiki_search` can match both endpoints plus the relation words
+- dashboards can surface contradictions or stale edges like any other claim
+- humans can read the page without reverse-engineering a hidden graph model
+
+Practical query patterns:
+
+- `wiki_search "atlas postgres depends"`
+- `wiki_search "nora atlas approvals"`
+- `memory_search corpus=all "billing alerts on-call sre"`
+
 ## Compile pipeline
 
 The compile step reads wiki pages, normalizes summaries, and emits stable
