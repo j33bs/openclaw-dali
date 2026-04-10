@@ -182,10 +182,12 @@ export function parseVllmCoderStartBlocked(line) {
   const reason = text.match(/reason=([A-Z0-9_]+)/u)?.[1] ?? "BLOCKED";
   const freeMb = text.match(/free_mb=([A-Za-z0-9._-]+)/u)?.[1];
   const minFreeMb = text.match(/min_free_mb=([A-Za-z0-9._-]+)/u)?.[1];
+  const model = text.match(/model=([^\s]+)/u)?.[1];
   return {
     reason,
     ...(freeMb ? { freeMb } : {}),
     ...(minFreeMb ? { minFreeMb } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -224,11 +226,43 @@ export function detectVllmCoderJournalIssue(params = {}) {
         unit,
         ...(parsed.freeMb ? { freeMb: parsed.freeMb } : {}),
         ...(parsed.minFreeMb ? { minFreeMb: parsed.minFreeMb } : {}),
+        ...(parsed.model ? { model: parsed.model } : {}),
       };
     }
   }
 
   return { reason: "NO_BLOCK_MARKER", note: "journal_no_marker", unit: null };
+}
+
+function buildLocalProviderHint({
+  providerId,
+  probeReason,
+  journalReason,
+  freeMb,
+  minFreeMb,
+  model,
+}) {
+  if (providerId === "vllm") {
+    switch (journalReason) {
+      case "VRAM_LOW":
+        if (freeMb && minFreeMb) {
+          return `free VRAM ${freeMb} MiB is below required ${minFreeMb} MiB`;
+        }
+        return "free VRAM is below the configured minimum";
+      case "MODEL_LOAD_FAILED":
+        return model ? `model load failed for ${model}` : "model load failed";
+      case "NO_BLOCK_MARKER":
+        return probeReason ? `HTTP probe failed: ${probeReason}` : "HTTP probe failed";
+      default:
+        return journalReason ? `journal reported ${journalReason}` : undefined;
+    }
+  }
+
+  if (providerId === "ollama" || providerId === "sglang") {
+    return probeReason ? `HTTP probe failed: ${probeReason}` : "HTTP probe failed";
+  }
+
+  return undefined;
 }
 
 export function buildLocalProviderHealthSummary(params) {
@@ -241,6 +275,7 @@ export function buildLocalProviderHealthSummary(params) {
       coderStatus: "UNCONFIGURED",
       reason: "not_configured",
       note: "no_local_provider_configured",
+      hint: "configure ollama, vllm, or sglang in models.json",
       modelIds: [],
     };
   }
@@ -270,10 +305,21 @@ export function buildLocalProviderHealthSummary(params) {
       coderStatus: journal.reason === "NO_BLOCK_MARKER" ? "DOWN" : "DEGRADED",
       reason: journal.reason,
       note: journal.note,
+      hint: buildLocalProviderHint({
+        providerId: provider.providerId,
+        probeReason: probe.reason,
+        journalReason: journal.reason,
+        freeMb: journal.freeMb,
+        minFreeMb: journal.minFreeMb,
+        model: journal.model,
+      }),
       url: probe.url,
       modelCount: probe.modelCount,
       modelIds: provider.modelIds,
       ...(journal.unit ? { unit: journal.unit } : {}),
+      ...(journal.freeMb ? { freeMb: journal.freeMb } : {}),
+      ...(journal.minFreeMb ? { minFreeMb: journal.minFreeMb } : {}),
+      ...(journal.model ? { model: journal.model } : {}),
     };
   }
 
@@ -283,6 +329,10 @@ export function buildLocalProviderHealthSummary(params) {
     coderStatus: "DOWN",
     reason: probe.reason,
     note: "http_probe_failed",
+    hint: buildLocalProviderHint({
+      providerId: provider.providerId,
+      probeReason: probe.reason,
+    }),
     url: probe.url,
     modelCount: probe.modelCount,
     modelIds: provider.modelIds,
@@ -322,10 +372,14 @@ function formatPlainSummary(summary) {
     `coder_status=${summary.coderStatus}`,
     `reason=${summary.reason}`,
     `note=${summary.note}`,
+    ...(summary.hint ? [`hint=${summary.hint}`] : []),
     ...(summary.url ? [`url=${summary.url}`] : []),
     ...(typeof summary.modelCount === "number" ? [`model_count=${summary.modelCount}`] : []),
     ...(Array.isArray(summary.modelIds) ? [`configured_models=${summary.modelIds.join(",")}`] : []),
     ...(summary.unit ? [`unit=${summary.unit}`] : []),
+    ...(summary.model ? [`model=${summary.model}`] : []),
+    ...(summary.freeMb ? [`free_mb=${summary.freeMb}`] : []),
+    ...(summary.minFreeMb ? [`min_free_mb=${summary.minFreeMb}`] : []),
   ].join("\n");
 }
 

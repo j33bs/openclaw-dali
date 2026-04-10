@@ -101,6 +101,15 @@ describe("scripts/check-local-provider-health", () => {
       freeMb: "1466",
       minFreeMb: "7000",
     });
+
+    expect(
+      parseVllmCoderStartBlocked(
+        "VLLM_CODER_START_BLOCKED reason=MODEL_LOAD_FAILED model=local-coder",
+      ),
+    ).toEqual({
+      reason: "MODEL_LOAD_FAILED",
+      model: "local-coder",
+    });
   });
 
   it("prefers the tool-managed vLLM coder unit before the legacy unit", () => {
@@ -150,7 +159,10 @@ describe("scripts/check-local-provider-health", () => {
       coderStatus: "DEGRADED",
       reason: "VRAM_LOW",
       note: "journal_marker:openclaw-tool-coder-vllm-models.service",
+      hint: "free VRAM 1466 MiB is below required 7000 MiB",
       unit: "openclaw-tool-coder-vllm-models.service",
+      freeMb: "1466",
+      minFreeMb: "7000",
     });
   });
 
@@ -176,6 +188,7 @@ describe("scripts/check-local-provider-health", () => {
       coderStatus: "DOWN",
       reason: "connect ECONNREFUSED",
       note: "http_probe_failed",
+      hint: "HTTP probe failed: connect ECONNREFUSED",
     });
   });
 });
